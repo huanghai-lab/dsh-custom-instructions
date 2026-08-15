@@ -1,7 +1,7 @@
 {
   "name": "@huanghai-lab/dsh-custom-instructions",
   "description": "Custom instructions editor for the DSH web GUI: a settings page (side bar → 设置 → 自定义指令) that edits the global instruction file ~/.dsh/AGENTS.md, applied to every chat on the machine. Hot-pluggable — mounted via ~/.dsh/cordis.patch.yml + a profile node_modules symlink, no dsh source changes.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "engines": {
     "node": "^22.19.0 || >=24.0.0"

@@ -17,7 +17,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 
 /** Route prefix for this plugin's JSON operations. */
@@ -72,7 +72,8 @@ async function instructionsPath(ctx: Context): Promise<string> {
 
 /**
  * Register the route family. GET returns the current instructions (empty
- * string when the file does not exist yet), PUT replaces them.
+ * string only when the file does not exist — other read failures surface as
+ * errors), PUT replaces them.
  * @param ctx - context carrying webServer.
  * @returns the route disposers.
  */
@@ -85,18 +86,23 @@ export function registerCustomInstructionsRoutes(ctx: Context): Array<() => void
       // the dsh-web-ui family precedent (dsh-ssh store, dsh-skins): the host
       // half owns this file and mutates it through node:fs directly.
       if (req.method === 'GET') {
-        let text = ''
+        let text: string
         try {
-          text = readFileSync(path, 'utf8')
-        } catch {
-          // Absent file reads as an empty instruction set.
+          text = await readFile(path, 'utf8')
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+            // Absent file reads as an empty instruction set — and nothing else.
+            json(res, { ok: true, path, text: '' })
+            return
+          }
+          throw error
         }
         json(res, { ok: true, path, text })
         return
       }
       if (req.method === 'PUT') {
         const body = await readBody(req)
-        let text = ''
+        let text: string
         try {
           text = JSON.parse(body).text
         } catch {
@@ -107,9 +113,8 @@ export function registerCustomInstructionsRoutes(ctx: Context): Array<() => void
           json(res, { ok: false, error: 'expected { text: string }' }, 400)
           return
         }
-        const dir = dirname(path)
-        if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 })
-        writeFileSync(path, text, { encoding: 'utf8' })
+        await mkdir(dirname(path), { recursive: true, mode: 0o700 })
+        await writeFile(path, text, { encoding: 'utf8' })
         json(res, { ok: true, path })
         return
       }

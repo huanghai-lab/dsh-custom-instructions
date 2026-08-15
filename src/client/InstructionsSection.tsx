@@ -2,7 +2,7 @@
  * The custom-instructions settings page body (JSX component).
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { readInstructions, writeInstructions } from './api.ts'
 
 /** Plugin CSS, scoped by a package-unique class prefix. */
@@ -39,10 +39,10 @@ export function CustomInstructionsSection(): JSX.Element {
   const noticeTimer = useRef<number | undefined>(undefined)
 
   /** Drop any transient notice (success text auto-clears after a while). */
-  const clearNoticeSoon = (): void => {
+  const clearNoticeSoon = useCallback((): void => {
     if (noticeTimer.current !== undefined) window.clearTimeout(noticeTimer.current)
     noticeTimer.current = window.setTimeout(() => setNotice(null), 3000)
-  }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -71,7 +71,7 @@ export function CustomInstructionsSection(): JSX.Element {
 
   const dirty = loaded && text !== savedText
 
-  const save = (): void => {
+  const save = useCallback((): void => {
     if (saving || !loaded) return
     setSaving(true)
     setNotice(null)
@@ -91,7 +91,7 @@ export function CustomInstructionsSection(): JSX.Element {
         setSaving(false)
         setNotice({ kind: 'err', text: '保存失败，请检查连接后重试' })
       })
-  }
+  }, [saving, loaded, text, clearNoticeSoon])
 
   // Ctrl/Cmd+S saves the instructions without leaving the page.
   useEffect(() => {
@@ -103,7 +103,7 @@ export function CustomInstructionsSection(): JSX.Element {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  })
+  }, [save])
 
   return (
     <div className="custinstr-page">
