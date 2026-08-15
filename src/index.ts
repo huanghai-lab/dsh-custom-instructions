@@ -7,14 +7,17 @@
  * document's directory so DSH_HOME overrides work). The browser half
  * (./client) renders the settings page (设置 → 自定义指令).
  *
- * Everything rides official DSH services (webServer + fs) — no dsh source
- * changes, hot-pluggable via a cordis.patch.yml row.
+ * The instructions file lives in $DSH_HOME (outside the session workspace),
+ * so the file is mutated through node:fs directly — same precedent as the
+ * dsh-web-ui family's host stores (dsh-ssh). The webServer service carries
+ * the routes. No dsh source changes, hot-pluggable via a cordis.patch.yml row.
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
-import { join, dirname } from 'node:path'
+import { dirname, join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 
 /** Route prefix for this plugin's JSON operations. */
@@ -77,16 +80,14 @@ export function registerCustomInstructionsRoutes(ctx: Context): Array<() => void
   const handler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const path = await instructionsPath(ctx)
     try {
-      const fs = ctx.get('fs')
-      if (fs === undefined) {
-        json(res, { ok: false, error: 'filesystem unavailable' }, 503)
-        return
-      }
-      const target = await fs.resolve(path)
+      // The instructions file lives in $DSH_HOME, outside the session
+      // workspace, so the sandboxed `ctx.fs` would refuse the write. Follow
+      // the dsh-web-ui family precedent (dsh-ssh store, dsh-skins): the host
+      // half owns this file and mutates it through node:fs directly.
       if (req.method === 'GET') {
         let text = ''
         try {
-          text = await fs.readText(target)
+          text = readFileSync(path, 'utf8')
         } catch {
           // Absent file reads as an empty instruction set.
         }
@@ -106,7 +107,9 @@ export function registerCustomInstructionsRoutes(ctx: Context): Array<() => void
           json(res, { ok: false, error: 'expected { text: string }' }, 400)
           return
         }
-        await fs.writeText(target, text)
+        const dir = dirname(path)
+        if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 })
+        writeFileSync(path, text, { encoding: 'utf8' })
         json(res, { ok: true, path })
         return
       }
