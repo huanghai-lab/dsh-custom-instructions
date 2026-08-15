@@ -39,6 +39,13 @@ dsh plugin --profile <profile> add link:~/dsh-custom-instructions
 
 Uninstall: `dsh plugin --profile <profile> remove custom-instructions`
 
+### Compatibility and security
+
+- This version is built against the DSH `0.1.0-rc.6` client APIs and requires Node.js `22.19.0` or `24.x` and newer.
+- Installation currently requires building from source; no prebuilt package is provided yet.
+- The editor writes the current user's global `AGENTS.md` through the DSH Web Server. Do not expose the DSH Web GUI to an untrusted network; access control for this route is provided by the DSH Web Server.
+- The plugin may need updates if DSH changes its global-instruction loading or settings-document path behavior.
+
 ## Usage
 
 1. Open the DSH Web GUI, click the settings gear at the bottom of the side bar.

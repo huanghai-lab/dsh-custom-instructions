@@ -13,6 +13,8 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { homedir } from 'node:os'
+import { join, dirname } from 'node:path'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 
 /** Route prefix for this plugin's JSON operations. */
@@ -56,13 +58,13 @@ async function instructionsPath(ctx: Context): Promise<string> {
     try {
       const doc = await settings.prepareDocument()
       if (typeof doc === 'string' && doc.length > 0) {
-        return doc.replace(/[\\/]settings\.ya?ml$/, '') + '/AGENTS.md'
+        return join(dirname(doc), 'AGENTS.md')
       }
     } catch {
       // Fall through to the conventional path below.
     }
   }
-  return 'C:/Users/25434/.dsh/AGENTS.md'
+  return join(homedir(), '.dsh', 'AGENTS.md')
 }
 
 /**

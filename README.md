@@ -39,6 +39,13 @@ dsh plugin --profile <profile> add link:~/dsh-custom-instructions
 
 卸载：`dsh plugin --profile <profile> remove custom-instructions`
 
+### 兼容性与安全说明
+
+- 当前版本按 DSH `0.1.0-rc.6` 客户端接口构建，Node.js 要求为 `22.19.0` 或 `24.x` 及更高版本。
+- 目前需要从源码构建，仓库暂未提供预构建安装包。
+- 编辑器会通过 DSH Web Server 写入当前用户的全局 `AGENTS.md`。请不要把 DSH Web GUI 暴露给不可信网络；接口的访问控制依赖 DSH Web Server 本身。
+- 如果 DSH 的全局指令加载机制或设置文档路径发生变化，插件需要同步更新。
+
 ## 使用
 
 1. 打开 DSH Web GUI，点侧边栏底部的设置（齿轮）
