@@ -3,7 +3,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { readInstructions, writeInstructions } from './api.ts'
+import { readInstructions, restoreInstructions, writeInstructions } from './api.ts'
 
 /** Plugin CSS, scoped by a package-unique class prefix. */
 export const CSS = `
@@ -19,13 +19,23 @@ export const CSS = `
 .custinstr-save:not(:disabled):hover { opacity: 0.9; }
 .custinstr-save:not(:disabled):active { transform: translateY(1px); }
 .custinstr-save:disabled { opacity: 0.5; cursor: default; }
+.custinstr-restore { height: 34px; padding: 0 14px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 17px; background: transparent; color: var(--dsw-alias-label-primary); cursor: pointer; font-size: 13px; }
+.custinstr-restore:not(:disabled):hover { background: var(--dsw-alias-bg-layer-2); }
+.custinstr-restore:disabled { opacity: 0.5; cursor: default; }
 .custinstr-ok { font-size: 12px; color: var(--dsw-alias-state-success-primary); }
 .custinstr-err { font-size: 12px; color: var(--dsw-alias-state-error-primary); }
 .custinstr-meta { font-size: 12px; color: var(--dsw-alias-label-secondary); }
 .custinstr-count { margin-left: auto; font-size: 12px; color: var(--dsw-alias-label-secondary); }
+.custinstr-count-over { color: var(--dsw-alias-state-error-primary); }
+.custinstr-count-near { color: var(--dsw-alias-state-warn-primary); }
 .custinstr-dirty { font-size: 12px; color: var(--dsw-alias-state-warn-primary); }
 .custinstr-loading { font-size: 13px; color: var(--dsw-alias-label-secondary); }
 `
+
+/** UTF-8 byte length of a string (the DSH loader's actual budget unit). */
+function utf8Bytes(value: string): number {
+  return new TextEncoder().encode(value).length
+}
 
 /** The settings page body. */
 export function CustomInstructionsSection(): JSX.Element {
@@ -33,9 +43,11 @@ export function CustomInstructionsSection(): JSX.Element {
   const [savedText, setSavedText] = useState('')
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [restoring, setRestoring] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [path, setPath] = useState('')
+  const [maxBytes, setMaxBytes] = useState(65536)
   const noticeTimer = useRef<number | undefined>(undefined)
 
   /** Drop any transient notice (success text auto-clears after a while). */
@@ -53,6 +65,7 @@ export function CustomInstructionsSection(): JSX.Element {
           setText(res.text ?? '')
           setSavedText(res.text ?? '')
           setPath(res.path ?? '')
+          if (res.maxBytes !== undefined) setMaxBytes(res.maxBytes)
         } else {
           setError(res.error ?? '读取失败，请刷新页面重试')
         }
@@ -70,9 +83,12 @@ export function CustomInstructionsSection(): JSX.Element {
   }, [])
 
   const dirty = loaded && text !== savedText
+  const bytes = utf8Bytes(text)
+  const overLimit = bytes > maxBytes
+  const nearLimit = !overLimit && bytes > maxBytes * 0.9
 
   const save = useCallback((): void => {
-    if (saving || !loaded) return
+    if (saving || !loaded || overLimit) return
     setSaving(true)
     setNotice(null)
     writeInstructions(text)
@@ -91,7 +107,30 @@ export function CustomInstructionsSection(): JSX.Element {
         setSaving(false)
         setNotice({ kind: 'err', text: '保存失败，请检查连接后重试' })
       })
-  }, [saving, loaded, text, clearNoticeSoon])
+  }, [saving, loaded, overLimit, text, clearNoticeSoon])
+
+  /** Undo the last save by restoring the one-generation backup. */
+  const restore = useCallback((): void => {
+    if (restoring || !loaded) return
+    setRestoring(true)
+    setNotice(null)
+    restoreInstructions()
+      .then((res) => {
+        setRestoring(false)
+        if (res.ok) {
+          setText(res.text ?? '')
+          setSavedText(res.text ?? '')
+          setNotice({ kind: 'ok', text: '已恢复上次保存前的内容' })
+          clearNoticeSoon()
+        } else {
+          setNotice({ kind: 'err', text: `撤销失败: ${res.error ?? '未知错误'}` })
+        }
+      })
+      .catch(() => {
+        setRestoring(false)
+        setNotice({ kind: 'err', text: '撤销失败，请检查连接后重试' })
+      })
+  }, [restoring, loaded, clearNoticeSoon])
 
   // Ctrl/Cmd+S saves the instructions without leaving the page.
   useEffect(() => {
@@ -104,6 +143,13 @@ export function CustomInstructionsSection(): JSX.Element {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [save])
+
+  const countClass = overLimit ? 'custinstr-count custinstr-count-over' : nearLimit ? 'custinstr-count custinstr-count-near' : 'custinstr-count'
+  const limitNote = overLimit
+    ? `超出上限，保存已禁用`
+    : nearLimit
+      ? '接近上限'
+      : ''
 
   return (
     <div className="custinstr-page">
@@ -123,13 +169,20 @@ export function CustomInstructionsSection(): JSX.Element {
         aria-label="自定义指令"
         aria-describedby="custinstr-help"
       />
-      <p id="custinstr-help" className="custinstr-desc">内容会写入当前主机的 AGENTS.md，仅对新会话生效。快捷键 Ctrl+S 保存。</p>
+      <p id="custinstr-help" className="custinstr-desc">
+        内容会写入当前主机的 AGENTS.md，仅对新会话生效。快捷键 Ctrl+S 保存；每次保存会把上一版内容备份为 AGENTS.md.bak，可用「撤销上次保存」恢复。
+      </p>
       <div className="custinstr-row">
-        <button className="custinstr-save" onClick={save} disabled={saving || !loaded || error !== ''}>
+        <button className="custinstr-save" onClick={save} disabled={saving || !loaded || error !== '' || overLimit}>
           {saving ? '保存中…' : '保存'}
         </button>
+        <button className="custinstr-restore" onClick={restore} disabled={restoring || !loaded}>
+          {restoring ? '恢复中…' : '撤销上次保存'}
+        </button>
         {dirty && <span className="custinstr-dirty" aria-live="polite">有未保存的更改</span>}
-        <span className="custinstr-count">{Array.from(text).length} 字符</span>
+        <span className={countClass} aria-live="polite">
+          {Array.from(text).length} 字符 / {bytes} / {maxBytes} 字节{limitNote !== '' && `（${limitNote}）`}
+        </span>
         {notice !== null && <span className={notice.kind === 'ok' ? 'custinstr-ok' : 'custinstr-err'} aria-live="polite">{notice.text}</span>}
       </div>
       {error !== '' && <p className="custinstr-err" role="alert">{error}</p>}

@@ -2,6 +2,7 @@
 
 > A "Custom Instructions" editor for the DSH Web GUI — edit the global instruction file that applies to **every chat** on the machine, from a settings page that looks like ChatGPT's Custom Instructions panel.
 
+[![CI](https://github.com/huanghai-lab/dsh-custom-instructions/actions/workflows/ci.yml/badge.svg)](https://github.com/huanghai-lab/dsh-custom-instructions/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 ## What it is
@@ -21,30 +22,40 @@ Just like ChatGPT's Custom Instructions, write the rules you want every conversa
 | Settings page entry | Side bar → Settings → Custom Instructions |
 | Full edit | Edit the whole `~/.dsh/AGENTS.md` file |
 | Instant apply | Save writes the file; new sessions load it (settings hot-reload) |
+| Undo save | Each save rotates the previous content into `AGENTS.md.bak`; "撤销上次保存" restores it in one click |
+| Size guidance | Live char / byte / cap (65 KB) counters; near-limit turns amber, over-limit disables saving |
+| Shortcut | Ctrl/Cmd+S saves |
 | Path aware | Locates AGENTS.md via `$DSH_HOME/settings.yaml`, honors DSH_HOME overrides |
 | Hot-pluggable | `dsh plugin add link:` — no DSH source changes |
 
 ## Install
 
+**Prebuilt (recommended)**: the repository ships the `lib/` build artifacts, so no local build is needed:
+
 ```bash
-# 1. Clone and build
+# 1. Clone
 git clone https://github.com/huanghai-lab/dsh-custom-instructions.git
 cd dsh-custom-instructions
-pnpm install
-pnpm build
 
 # 2. Mount into the DSH web profile (<profile> is usually web)
 dsh plugin --profile <profile> add link:~/dsh-custom-instructions
+```
+
+From source (development / customization):
+
+```bash
+pnpm install
+pnpm build
+# then mount as above
 ```
 
 Uninstall: `dsh plugin --profile <profile> remove custom-instructions`
 
 ### Compatibility and security
 
-- This version is built against the DSH `0.1.0-rc.6` client APIs and requires Node.js `22.19.0` or `24.x` and newer.
-- Installation currently requires building from source; no prebuilt package is provided yet.
+- Built against the DSH `0.1.0-rc.6` client APIs (type-level only; devDependencies are pinned exactly). At runtime the package depends only on DSH-provided services (`webServer`) and the `react` peer — no `@deepseek-ai/*` runtime code is inlined. Rebuild with `pnpm build` after a DSH upgrade changes these interfaces.
+- Node.js `^22.19.0 || >=24.0.0`.
 - The editor writes the current user's global `AGENTS.md` through the DSH Web Server. Do not expose the DSH Web GUI to an untrusted network; access control for this route is provided by the DSH Web Server.
-- The plugin may need updates if DSH changes its global-instruction loading or settings-document path behavior.
 
 ## Usage
 

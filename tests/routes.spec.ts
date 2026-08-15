@@ -55,7 +55,7 @@ function fakeCtx(settingsDoc: string): {
       events[event]?.push(listener)
       return req
     }
-    if (method === 'PUT' && body !== undefined) {
+    if ((method === 'PUT' || method === 'POST') && body !== undefined) {
       const call = (): void => {
         for (const listener of events.data) listener(Buffer.from(body, 'utf8'))
         for (const listener of events.end) listener()
@@ -65,7 +65,7 @@ function fakeCtx(settingsDoc: string): {
       // would race ahead of registration. A macrotask runs after the handler
       // has reached `readBody` and installed the listeners.
       setTimeout(call, 0)
-    } else if (method === 'PUT') {
+    } else if (method === 'PUT' || method === 'POST') {
       setTimeout(() => { for (const listener of events.end) listener() }, 0)
     }
     await captured(req as never, res as never)
@@ -102,7 +102,7 @@ describe('registerCustomInstructionsRoutes', () => {
       const res = await handler('GET')
       const parsed = envelope(res)
       expect(res.status).toBe(200)
-      expect(parsed).toEqual({ ok: true, path: join(dir, 'AGENTS.md'), text: '' })
+      expect(parsed).toEqual({ ok: true, path: join(dir, 'AGENTS.md'), text: '', maxBytes: 65536 })
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -190,6 +190,81 @@ describe('registerCustomInstructionsRoutes', () => {
       const res = await handler('DELETE')
       expect(res.status).toBe(405)
       expect(res.body).toBe('')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('GET reports the byte cap so the UI can surface the limit', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'custinstr-'))
+    try {
+      const { handler } = fakeCtx(join(dir, 'settings.yaml'))
+      const res = await handler('GET')
+      const parsed = envelope(res)
+      expect(res.status).toBe(200)
+      expect(typeof parsed.maxBytes).toBe('number')
+      expect(parsed.maxBytes as number).toBeGreaterThan(0)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('PUT rotates the previous content into the .bak backup', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'custinstr-'))
+    try {
+      const path = join(dir, 'AGENTS.md')
+      const { handler } = fakeCtx(join(dir, 'settings.yaml'))
+      const first = await handler('PUT', JSON.stringify({ text: '第一版内容\n' }))
+      expect(envelope(first).ok).toBe(true)
+      const second = await handler('PUT', JSON.stringify({ text: '第二版内容\n' }))
+      expect(envelope(second).ok).toBe(true)
+      expect(await readFile(path, 'utf8')).toBe('第二版内容\n')
+      expect(await readFile(`${path}.bak`, 'utf8')).toBe('第一版内容\n')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('POST restore recovers the backed-up content and returns it', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'custinstr-'))
+    try {
+      const path = join(dir, 'AGENTS.md')
+      const { handler } = fakeCtx(join(dir, 'settings.yaml'))
+      await handler('PUT', JSON.stringify({ text: '原始内容\n' }))
+      await handler('PUT', JSON.stringify({ text: '误改的内容\n' }))
+      const res = await handler('POST', JSON.stringify({ action: 'restore' }))
+      const parsed = envelope(res)
+      expect(res.status).toBe(200)
+      expect(parsed.ok).toBe(true)
+      expect(parsed.text).toBe('原始内容\n')
+      expect(await readFile(path, 'utf8')).toBe('原始内容\n')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('POST restore answers 404 when no backup exists', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'custinstr-'))
+    try {
+      const { handler } = fakeCtx(join(dir, 'settings.yaml'))
+      const res = await handler('POST', JSON.stringify({ action: 'restore' }))
+      const parsed = envelope(res)
+      expect(res.status).toBe(404)
+      expect(parsed.ok).toBe(false)
+      expect(parsed.error).toBe('no backup available')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('POST rejects an unknown action with 400', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'custinstr-'))
+    try {
+      const { handler } = fakeCtx(join(dir, 'settings.yaml'))
+      const res = await handler('POST', JSON.stringify({ action: 'explode' }))
+      const parsed = envelope(res)
+      expect(res.status).toBe(400)
+      expect(parsed.ok).toBe(false)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

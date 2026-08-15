@@ -17,11 +17,14 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 
 /** Route prefix for this plugin's JSON operations. */
 export const ROUTE_PREFIX = '/api/dsh-custom-instructions'
+
+/** UTF-8 byte cap the DSH workspace-instruction loader accepts. */
+export const MAX_INSTRUCTIONS_BYTES = 65536
 
 export const inject = ['webServer']
 
@@ -32,14 +35,14 @@ function json(res: ServerResponse, payload: unknown, status = 200): void {
 }
 
 /** Read the request body (bounded) as UTF-8 text. */
-function readBody(req: IncomingMessage, maxBytes = 256 * 1024): Promise<string> {
+function readBody(req: IncomingMessage, maxBytes = MAX_INSTRUCTIONS_BYTES): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
     let total = 0
     req.on('data', (chunk: Buffer) => {
       total += chunk.length
       if (total > maxBytes) {
-        reject(new Error('request body too large'))
+        reject(new Error(`request body exceeds ${maxBytes} bytes`))
         req.destroy()
         return
       }
@@ -70,10 +73,17 @@ async function instructionsPath(ctx: Context): Promise<string> {
   return join(homedir(), '.dsh', 'AGENTS.md')
 }
 
+/** The backup file beside the instructions file (one-generation rollback). */
+function backupPath(path: string): string {
+  return `${path}.bak`
+}
+
 /**
- * Register the route family. GET returns the current instructions (empty
- * string only when the file does not exist — other read failures surface as
- * errors), PUT replaces them.
+ * Register the route family:
+ * - GET   — current instructions (empty only on ENOENT; other errors surface)
+ * - PUT   — replace instructions; the previous content is rotated into
+ *           `<path>.bak` first (one-generation rollback)
+ * - POST  — restore the backup over the current content (undo last save)
  * @param ctx - context carrying webServer.
  * @returns the route disposers.
  */
@@ -92,12 +102,12 @@ export function registerCustomInstructionsRoutes(ctx: Context): Array<() => void
         } catch (error) {
           if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
             // Absent file reads as an empty instruction set — and nothing else.
-            json(res, { ok: true, path, text: '' })
+            json(res, { ok: true, path, text: '', maxBytes: MAX_INSTRUCTIONS_BYTES })
             return
           }
           throw error
         }
-        json(res, { ok: true, path, text })
+        json(res, { ok: true, path, text, maxBytes: MAX_INSTRUCTIONS_BYTES })
         return
       }
       if (req.method === 'PUT') {
@@ -114,8 +124,44 @@ export function registerCustomInstructionsRoutes(ctx: Context): Array<() => void
           return
         }
         await mkdir(dirname(path), { recursive: true, mode: 0o700 })
+        // Rotate the current content into the backup slot before replacing it.
+        // The temp-then-rename keeps the backup atomic too.
+        try {
+          await copyFile(path, `${path}.tmp-bak`)
+          await rename(`${path}.tmp-bak`, backupPath(path))
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error
+          // No previous content: nothing to back up.
+        }
         await writeFile(path, text, { encoding: 'utf8' })
-        json(res, { ok: true, path })
+        json(res, { ok: true, path, maxBytes: MAX_INSTRUCTIONS_BYTES })
+        return
+      }
+      if (req.method === 'POST') {
+        const body = await readBody(req)
+        let action = ''
+        try {
+          action = JSON.parse(body).action
+        } catch {
+          json(res, { ok: false, error: 'invalid JSON body' }, 400)
+          return
+        }
+        if (action !== 'restore') {
+          json(res, { ok: false, error: 'expected { action: "restore" }' }, 400)
+          return
+        }
+        let previous: string
+        try {
+          previous = await readFile(backupPath(path), 'utf8')
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+            json(res, { ok: false, error: 'no backup available' }, 404)
+            return
+          }
+          throw error
+        }
+        await writeFile(path, previous, { encoding: 'utf8' })
+        json(res, { ok: true, path, text: previous })
         return
       }
       res.writeHead(405)

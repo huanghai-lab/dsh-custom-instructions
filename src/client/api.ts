@@ -12,24 +12,33 @@ export interface InstructionsResult {
   path?: string
   text?: string
   error?: string
+  /** UTF-8 byte cap the DSH workspace-instruction loader accepts. */
+  maxBytes?: number
+}
+
+/** Parse a JSON response, throwing on non-2xx statuses. */
+async function request(method: string, body?: unknown): Promise<InstructionsResult> {
+  const response = await fetch(ROUTE_PREFIX, {
+    method,
+    headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  const result = (await response.json()) as InstructionsResult
+  if (!response.ok) throw new Error(result.error ?? `HTTP ${response.status}`)
+  return result
 }
 
 /** Read the current global instructions (empty string when none exist). */
 export async function readInstructions(): Promise<InstructionsResult> {
-  const response = await fetch(ROUTE_PREFIX, { method: 'GET' })
-  const result = (await response.json()) as InstructionsResult
-  if (!response.ok) throw new Error(result.error ?? '请求失败')
-  return result
+  return request('GET')
 }
 
 /** Replace the global instructions. */
 export async function writeInstructions(text: string): Promise<InstructionsResult> {
-  const response = await fetch(ROUTE_PREFIX, {
-    method: 'PUT',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ text }),
-  })
-  const result = (await response.json()) as InstructionsResult
-  if (!response.ok) throw new Error(result.error ?? '请求失败')
-  return result
+  return request('PUT', { text })
+}
+
+/** Restore the one-generation backup (undo the last save). */
+export async function restoreInstructions(): Promise<InstructionsResult> {
+  return request('POST', { action: 'restore' })
 }
