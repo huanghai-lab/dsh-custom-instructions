@@ -17,7 +17,9 @@ export interface InstructionsResult {
 /** Read the current global instructions (empty string when none exist). */
 export async function readInstructions(): Promise<InstructionsResult> {
   const response = await fetch(ROUTE_PREFIX, { method: 'GET' })
-  return (await response.json()) as InstructionsResult
+  const result = (await response.json()) as InstructionsResult
+  if (!response.ok) throw new Error(result.error ?? '请求失败')
+  return result
 }
 
 /** Replace the global instructions. */
@@ -27,5 +29,7 @@ export async function writeInstructions(text: string): Promise<InstructionsResul
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ text }),
   })
-  return (await response.json()) as InstructionsResult
+  const result = (await response.json()) as InstructionsResult
+  if (!response.ok) throw new Error(result.error ?? '请求失败')
+  return result
 }
