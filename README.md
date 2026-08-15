@@ -1,30 +1,33 @@
 # dsh-custom-instructions
 
-> DSH Web GUI 的「自定义指令」编辑器 —— 在设置页直接编辑对**所有聊天**生效的全局指令文件，界面类似 ChatGPT 的 Custom Instructions。
+> DSH Web GUI 的「指令管理中心」 —— 在设置页可视化管理对所有聊天生效的全局指令、多套指令模板、版本历史，并一览项目级指令与当前 persona。
 
 [![CI](https://github.com/huanghai-lab/dsh-custom-instructions/actions/workflows/ci.yml/badge.svg)](https://github.com/huanghai-lab/dsh-custom-instructions/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 ## 这是什么
 
-在 DSH（DeepSeek Harness）Web GUI 的侧边栏 **设置 → 自定义指令** 新增一个设置页面：
+在 DSH（DeepSeek Harness）Web GUI 的侧边栏 **设置 → 自定义指令** 提供完整的指令管理界面：
 
-- 一个大文本框，内容就是 `~/.dsh/AGENTS.md`（用户全局指令文件，每次会话自动加载）
-- 点「保存」立即写入，新会话自动生效
-- 页面底部显示实际存储位置
+- **全局指令**：一个大文本框，内容就是 `~/.dsh/AGENTS.md`（用户全局指令文件，每次会话自动加载），保存即生效
+- **指令模板**：保存多套指令集（写作规范、代码规范、研究规范……），一键激活切换，支持导入导出
+- **版本历史**：每次保存自动留档，可回退任意历史版本
+- **生效范围与 Persona**：一览各工作区的项目级 AGENTS.md 与当前默认 agent preset 的 persona 概览
 
-和 ChatGPT 的 Custom Instructions 一样，你可以在这里写"每次聊天都该遵守的规则"——比如常驻的写作风格、回答偏好、工作流约定。所有未来的聊天都会自动带上这些指令。
+和 ChatGPT 的 Custom Instructions 一样，你可以在这里写"每次聊天都该遵守的规则"——现在还能按场景切换多套规则。
 
 ## 功能
 
 | 功能 | 说明 |
 |---|---|
-| 设置页入口 | 侧边栏 设置 → 自定义指令（独立设置页面） |
-| 全量编辑 | 直接编辑 `~/.dsh/AGENTS.md` 全文 |
-| 即时生效 | 保存即写入，新会话自动加载（settings 热重载） |
-| 撤销保存 | 每次保存前把上一版轮转成 `AGENTS.md.bak`，「撤销上次保存」一键恢复 |
-| 长度提示 | 实时显示字符数 / 字节数 / 上限（65 KB），接近上限变色、超限禁用保存 |
-| 快捷键 | Ctrl/Cmd+S 保存 |
+| 全局指令编辑 | 直接编辑 `~/.dsh/AGENTS.md` 全文，Ctrl+S 保存 |
+| 撤销保存 | 每次保存把上一版轮转成 `AGENTS.md.bak`，「撤销上次保存」一键恢复 |
+| 指令模板 | 多套指令集的创建、激活切换、删除；激活即替换全局指令（自动入历史） |
+| 版本历史 | 每次保存（含模板激活）自动留档，可恢复到任意版本 |
+| 导入导出 | 模板 + 历史 + 当前内容打包为一个 JSON 文件，跨机器迁移 |
+| 项目级指令视图 | 列出各工作区及其根目录 AGENTS.md 存在性（只读） |
+| Persona 概览 | 展示默认 agent preset 及 persona 段落（只读，打通 prompt 管理入口） |
+| 长度提示 | 实时字符数 / 字节数 / 上限（65 KB），接近变色、超限禁用保存 |
 | 路径自适应 | 通过 `$DSH_HOME/settings.yaml` 定位 AGENTS.md，支持 DSH_HOME 覆盖 |
 | 热插拔 | `dsh plugin add link:` 一键挂载，无需改动 DSH 源码 |
 
