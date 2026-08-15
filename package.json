@@ -73,6 +73,10 @@
     "cordis.patch.yml"
   ],
   "license": "Apache-2.0",
+  "homepage": "https://github.com/huanghai-lab/dsh-custom-instructions#readme",
+  "bugs": {
+    "url": "https://github.com/huanghai-lab/dsh-custom-instructions/issues"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/huanghai-lab/dsh-custom-instructions.git"
