@@ -1,300 +1,316 @@
-/**
- * dsh-custom-instructions — host half: the instruction center backend.
- *
- * One route family under /api/dsh-custom-instructions that manages the user's
- * global instruction file (~/.dsh/AGENTS.md), named instruction templates,
- * version history, backup/restore, import/export, plus read-only views of
- * project-level instructions and the active agent preset's persona. The
- * browser half (./client) renders the 设置 → 自定义指令 page.
- *
- * Files live in $DSH_HOME (outside the session workspace), so they are
- * mutated through node:fs directly — same precedent as the dsh-web-ui
- * family's host stores (dsh-ssh). The webServer service carries the routes.
- */
+/** Host routes for the DSH custom-instructions center. */
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
-import { basename, dirname, join } from 'node:path'
-import { mkdir, readFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
+import { readFile } from 'node:fs/promises'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import * as store from './host/store.ts'
 
-/** Route prefix for this plugin's JSON operations. */
 export const ROUTE_PREFIX = '/api/dsh-custom-instructions'
-
-/** UTF-8 byte cap the DSH workspace-instruction loader accepts. */
-export const MAX_INSTRUCTIONS_BYTES = 65536
+export const MAX_INSTRUCTIONS_BYTES = store.MAX_CONTENT_BYTES
+// JSON control-character escapes can expand one content byte to six bytes.
+const SMALL_BODY_BYTES = store.MAX_CONTENT_BYTES * 6 + 8 * 1024
 
 export const inject = ['webServer']
 
-/** One JSON envelope response. */
+class RequestError extends Error {
+  constructor(
+    public readonly code: string,
+    message: string,
+    public readonly status: 400 | 413,
+  ) {
+    super(message)
+    this.name = 'RequestError'
+  }
+}
+
 function json(res: ServerResponse, payload: unknown, status = 200): void {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
   res.end(JSON.stringify(payload))
 }
 
-/** Read the request body (bounded) as UTF-8 text. */
-function readBody(req: IncomingMessage, maxBytes = 4 * 1024 * 1024): Promise<string> {
+function fail(res: ServerResponse, status: number, code: string, message: string): void {
+  json(res, { code, message }, status)
+}
+
+function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
     let total = 0
-    req.on('data', (chunk: Buffer) => {
-      total += chunk.length
+    let tooLarge = false
+    req.on('data', (chunk: Buffer | string) => {
+      if (tooLarge) return
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+      total += buffer.length
       if (total > maxBytes) {
-        reject(new Error(`request body exceeds ${maxBytes} bytes`))
-        req.destroy()
+        tooLarge = true
+        chunks.length = 0
         return
       }
-      chunks.push(chunk)
+      chunks.push(buffer)
     })
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+    req.on('end', () => {
+      if (tooLarge) {
+        reject(new RequestError('PAYLOAD_TOO_LARGE', `request body exceeds ${maxBytes} bytes`, 413))
+        return
+      }
+      resolve(Buffer.concat(chunks).toString('utf8'))
+    })
     req.on('error', reject)
   })
 }
 
-/** Parse a JSON body or return undefined on failure. */
-async function parseJsonBody<T>(req: IncomingMessage): Promise<T | undefined> {
-  const body = await readBody(req)
+async function parseJsonBody(req: IncomingMessage, maxBytes = SMALL_BODY_BYTES): Promise<Record<string, unknown>> {
+  const text = await readBody(req, maxBytes)
   try {
-    return JSON.parse(body) as T
+    const parsed = JSON.parse(text) as unknown
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('body must be an object')
+    return parsed as Record<string, unknown>
   } catch {
-    return undefined
+    throw new RequestError('INVALID_JSON', 'request body must be a JSON object', 400)
   }
 }
 
-/**
- * Locate the user's global instruction file: the AGENTS.md beside the
- * settings document ($DSH_HOME/settings.yaml). Falls back to the conventional
- * home path when no settings document is available.
- */
+function expectedRevision(body: Record<string, unknown>): string {
+  if (typeof body.expectedRevision !== 'string' || !/^[0-9a-f]{64}$/i.test(body.expectedRevision)) {
+    throw new RequestError('EXPECTED_REVISION_REQUIRED', 'expectedRevision must be a SHA-256 revision', 400)
+  }
+  return body.expectedRevision
+}
+
 async function instructionsPath(ctx: Context): Promise<string> {
   const settings = ctx.get('settings')
   if (settings !== undefined) {
-    try {
-      const doc = await settings.prepareDocument()
-      if (typeof doc === 'string' && doc.length > 0) {
-        return join(dirname(doc), 'AGENTS.md')
-      }
-    } catch {
-      // Fall through to the conventional path below.
-    }
+    const document = await settings.prepareDocument()
+    if (typeof document === 'string' && document.length > 0) return join(dirname(document), 'AGENTS.md')
   }
   return join(homedir(), '.dsh', 'AGENTS.md')
 }
 
-/** Split the URL into path segments under the route prefix ('' for root). */
-function routePath(url: string | undefined): string[] {
+function routePath(url: string | undefined): string[] | null {
   const raw = (url ?? '').split('?')[0]
-  const prefix = ROUTE_PREFIX
-  if (raw === prefix) return ['']
-  if (!raw.startsWith(`${prefix}/`)) return ['']
-  return raw.slice(prefix.length + 1).split('/').map((segment) => decodeURIComponent(segment))
+  if (raw === ROUTE_PREFIX) return ['']
+  if (!raw.startsWith(`${ROUTE_PREFIX}/`)) return null
+  try {
+    return raw.slice(ROUTE_PREFIX.length + 1).split('/').map((segment) => decodeURIComponent(segment))
+  } catch {
+    throw new RequestError('BAD_PATH', 'request path contains invalid encoding', 400)
+  }
 }
 
-/**
- * Project-level instruction view: every registered workspace plus whether it
- * carries its own AGENTS.md at the root.
- */
-async function projectView(ctx: Context): Promise<Array<{ path: string; title: string; hasAgents: boolean }>> {
+interface ProjectEntry {
+  path: string
+  title: string
+  agentsPath: string
+  hasAgents: boolean
+  status: 'present' | 'missing' | 'unreadable'
+  message?: string
+}
+
+async function projectView(ctx: Context): Promise<ProjectEntry[]> {
   const registry = ctx.get('workspaceRegistry')
   if (registry === undefined) return []
   const workspaces = registry.list() as Array<{ id: string; path: string; title: string }>
-  const rows: Array<{ path: string; title: string; hasAgents: boolean }> = []
-  for (const workspace of workspaces) {
+  return Promise.all(workspaces.map(async (workspace) => {
+    const agentsPath = join(workspace.path, 'AGENTS.md')
     try {
-      await readFile(join(workspace.path, 'AGENTS.md'), 'utf8')
-      rows.push({ path: workspace.path, title: workspace.title, hasAgents: true })
-    } catch {
-      rows.push({ path: workspace.path, title: workspace.title, hasAgents: false })
+      await readFile(agentsPath, 'utf8')
+      return { path: workspace.path, title: workspace.title, agentsPath, hasAgents: true, status: 'present' as const }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+        return { path: workspace.path, title: workspace.title, agentsPath, hasAgents: false, status: 'missing' as const }
+      }
+      return {
+        path: workspace.path,
+        title: workspace.title,
+        agentsPath,
+        hasAgents: false,
+        status: 'unreadable' as const,
+        message: String((error as Error).message ?? error),
+      }
     }
-  }
-  return rows
+  }))
 }
 
-/**
- * Persona overview: the default preset's identity plus the first persona
- * section text found in its composition (read-only).
- */
-async function personaView(ctx: Context): Promise<{ preset: string; persona: string } | null> {
+async function personaView(ctx: Context): Promise<{
+  view: { preset: string; persona: string } | null
+  available: boolean
+  reason?: string
+}> {
   const presets = ctx.get('agentPresets')
-  if (presets === undefined) return null
+  if (presets === undefined) return { view: null, available: false, reason: 'agentPresets service is unavailable' }
   try {
     const preset = await presets.resolve()
     const composition = await presets.read(preset.id)
-    // Extract the persona row's text block (best effort YAML slice).
     const match = /- id:\s*persona[\s\S]*?text:\s*\|-?\s*\n([\s\S]*?)(?=\n- id:|\n---|\n\s{2,}\S+:|$)/.exec(composition)
-    const persona = match !== null ? match[1].trim() : ''
-    return { preset: preset.id, persona }
-  } catch {
-    return null
+    return { view: { preset: preset.id, persona: match?.[1].trim() ?? '' }, available: true }
+  } catch (error) {
+    return { view: null, available: false, reason: String((error as Error).message ?? error) }
   }
 }
 
-/**
- * Register the instruction-center route family.
- * @param ctx - context carrying webServer.
- * @returns the route disposers.
- */
+function handleError(ctx: Context, res: ServerResponse, error: unknown): void {
+  if (error instanceof store.StoreError || error instanceof RequestError) {
+    fail(res, error.status, error.code, error.message)
+    return
+  }
+  ctx.logger.warn(`dsh-custom-instructions: ${String(error)}`)
+  fail(res, 500, 'INTERNAL_ERROR', 'unexpected instruction storage error')
+}
+
 export function registerCustomInstructionsRoutes(ctx: Context): Array<() => void> {
   const handler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    const path = await instructionsPath(ctx)
-    const segments = routePath(req.url)
-    const sub = segments[0] ?? ''
     try {
-      // ── global instructions ────────────────────────────────────────────
-      if (sub === '' && req.method === 'GET') {
-        let text = ''
-        try {
-          text = await store.readGlobal(path)
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error
-        }
-        const [active, backup] = await Promise.all([store.readActive(path), store.hasBackup(path)])
-        json(res, { ok: true, path, text, maxBytes: MAX_INSTRUCTIONS_BYTES, active, hasBackup: backup })
+      const globalPath = await instructionsPath(ctx)
+      const segments = routePath(req.url)
+      if (segments === null) {
+        fail(res, 404, 'NOT_FOUND', 'route was not found')
         return
       }
-      if (sub === '' && req.method === 'PUT') {
-        const body = await parseJsonBody<{ text?: unknown }>(req)
-        if (body === undefined) { json(res, { ok: false, error: 'invalid JSON body' }, 400); return }
-        if (typeof body.text !== 'string') { json(res, { ok: false, error: 'expected { text: string }' }, 400); return }
-        await store.writeGlobal(path, body.text)
-        json(res, { ok: true, path, maxBytes: MAX_INSTRUCTIONS_BYTES })
-        return
-      }
-      if (sub === '' && req.method === 'POST') {
-        const body = await parseJsonBody<{ action?: unknown }>(req)
-        if (body === undefined) { json(res, { ok: false, error: 'invalid JSON body' }, 400); return }
-        if (body.action !== 'restore') { json(res, { ok: false, error: 'expected { action: "restore" }' }, 400); return }
-        try {
-          const previous = await store.restoreBackup(path)
-          json(res, { ok: true, path, text: previous })
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') { json(res, { ok: false, error: 'no backup available' }, 404); return }
-          throw error
-        }
+      const sub = segments[0] ?? ''
+
+      if (sub === '' && segments.length === 1 && req.method === 'GET') {
+        const { value: [text, active, backup], revision } = await store.readConsistent(globalPath, () => Promise.all([
+          store.readGlobal(globalPath), store.readActive(globalPath), store.hasBackup(globalPath),
+        ]))
+        json(res, {
+          ok: true,
+          path: globalPath,
+          text,
+          active,
+          hasBackup: backup,
+          revision,
+          maxBytes: store.MAX_CONTENT_BYTES,
+          maxTemplates: store.MAX_TEMPLATES,
+          maxHistory: store.MAX_HISTORY,
+          maxImportBytes: store.MAX_IMPORT_BYTES,
+        })
         return
       }
 
-      // ── templates (sub-paths first: activate / name-targeted routes) ───
-      if (sub === 'templates' && req.method === 'POST' && segments[1] === 'activate') {
-        const body = await parseJsonBody<{ name?: unknown }>(req)
-        if (body === undefined) { json(res, { ok: false, error: 'invalid JSON body' }, 400); return }
-        if (typeof body.name !== 'string') { json(res, { ok: false, error: 'expected { name: string }' }, 400); return }
-        try {
-          const text = await store.activateTemplate(path, body.name)
-          json(res, { ok: true, text })
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') { json(res, { ok: false, error: 'template not found' }, 404); return }
-          throw error
-        }
+      if (sub === '' && segments.length === 1 && req.method === 'PUT') {
+        const body = await parseJsonBody(req)
+        if (typeof body.text !== 'string') throw new RequestError('BAD_REQUEST', 'text must be a string', 400)
+        const result = await store.writeGlobal(globalPath, body.text, expectedRevision(body))
+        json(res, { ok: true, path: globalPath, active: null, maxBytes: store.MAX_CONTENT_BYTES, ...result })
         return
       }
-      if (sub === 'templates' && req.method === 'GET' && segments.length >= 2) {
-        try {
-          const text = await store.readTemplate(path, segments[1])
-          json(res, { ok: true, name: segments[1], text })
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') { json(res, { ok: false, error: 'template not found' }, 404); return }
-          throw error
-        }
+
+      if (sub === '' && segments.length === 1 && req.method === 'POST') {
+        const body = await parseJsonBody(req)
+        if (body.action !== 'restore') throw new RequestError('BAD_REQUEST', 'action must be "restore"', 400)
+        const result = await store.restoreBackup(globalPath, expectedRevision(body))
+        json(res, { ok: true, path: globalPath, active: null, ...result })
         return
       }
-      if (sub === 'templates' && req.method === 'PUT' && segments.length >= 2) {
-        const name = segments[1]
-        const body = await parseJsonBody<{ text?: unknown }>(req)
-        if (body === undefined) { json(res, { ok: false, error: 'invalid JSON body' }, 400); return }
-        if (typeof body.text !== 'string') { json(res, { ok: false, error: 'expected { text: string }' }, 400); return }
-        await store.writeTemplate(path, name, body.text)
-        json(res, { ok: true })
+
+      if (sub === 'templates' && segments.length === 2 && req.method === 'POST' && segments[1] === 'activate') {
+        const body = await parseJsonBody(req)
+        if (typeof body.name !== 'string') throw new RequestError('BAD_REQUEST', 'name must be a string', 400)
+        const result = await store.activateTemplate(globalPath, body.name, expectedRevision(body))
+        json(res, { ok: true, active: body.name, ...result })
         return
       }
-      if (sub === 'templates' && req.method === 'DELETE' && segments.length >= 2) {
-        await store.deleteTemplate(path, segments[1])
-        json(res, { ok: true })
+
+      if (sub === 'templates' && segments.length === 2 && req.method === 'GET') {
+        const { value: text, revision } = await store.readConsistent(
+          globalPath,
+          () => store.readTemplate(globalPath, segments[1]),
+        )
+        json(res, { ok: true, name: segments[1], text, revision })
         return
       }
-      if (sub === 'templates' && req.method === 'GET') {
-        const [templates, active] = await Promise.all([store.listTemplates(path), store.readActive(path)])
-        json(res, { ok: true, templates, active })
+
+      if (sub === 'templates' && segments.length === 2 && req.method === 'PUT') {
+        const body = await parseJsonBody(req)
+        if (typeof body.text !== 'string') throw new RequestError('BAD_REQUEST', 'text must be a string', 400)
+        const result = await store.writeTemplate(globalPath, segments[1], body.text, expectedRevision(body))
+        json(res, { ok: true, ...result })
         return
       }
-      if (sub === 'templates' && req.method === 'POST') {
-        // POST /templates {name, text} — create or update a template.
-        const body = await parseJsonBody<{ name?: unknown; text?: unknown }>(req)
-        if (body === undefined) { json(res, { ok: false, error: 'invalid JSON body' }, 400); return }
+
+      if (sub === 'templates' && segments.length === 2 && req.method === 'DELETE') {
+        const body = await parseJsonBody(req)
+        const result = await store.deleteTemplate(globalPath, segments[1], expectedRevision(body))
+        json(res, { ok: true, ...result })
+        return
+      }
+
+      if (sub === 'templates' && segments.length === 1 && req.method === 'GET') {
+        const { value: [templates, active], revision } = await store.readConsistent(globalPath, () => Promise.all([
+          store.listTemplates(globalPath), store.readActive(globalPath),
+        ]))
+        json(res, { ok: true, templates, active, revision })
+        return
+      }
+
+      if (sub === 'templates' && segments.length === 1 && req.method === 'POST') {
+        const body = await parseJsonBody(req)
         if (typeof body.name !== 'string' || typeof body.text !== 'string') {
-          json(res, { ok: false, error: 'expected { name: string, text: string }' }, 400)
-          return
+          throw new RequestError('BAD_REQUEST', 'name and text must be strings', 400)
         }
-        await store.writeTemplate(path, body.name, body.text)
-        json(res, { ok: true })
+        const result = await store.writeTemplate(globalPath, body.name, body.text, expectedRevision(body))
+        json(res, { ok: true, name: body.name, ...result })
         return
       }
 
-      // ── history ────────────────────────────────────────────────────────
-      if (sub === 'history' && req.method === 'GET') {
-        const history = await store.listHistory(path)
-        json(res, { ok: true, history })
-        return
-      }
-      if (sub === 'history' && req.method === 'POST' && segments[1] === 'restore') {
-        const body = await parseJsonBody<{ id?: unknown }>(req)
-        if (body === undefined) { json(res, { ok: false, error: 'invalid JSON body' }, 400); return }
-        if (typeof body.id !== 'string') { json(res, { ok: false, error: 'expected { id: string }' }, 400); return }
-        try {
-          const text = await store.restoreHistory(path, body.id)
-          json(res, { ok: true, text })
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') { json(res, { ok: false, error: 'history entry not found' }, 404); return }
-          throw error
-        }
+      if (sub === 'history' && segments.length === 2 && req.method === 'GET') {
+        const { value: text, revision } = await store.readConsistent(
+          globalPath,
+          () => store.readHistory(globalPath, segments[1]),
+        )
+        json(res, { ok: true, id: segments[1], text, revision })
         return
       }
 
-      // ── import / export ────────────────────────────────────────────────
-      if (sub === 'export' && req.method === 'POST') {
-        const bundle = await store.exportBundle(path)
-        json(res, { ok: true, bundle })
-        return
-      }
-      if (sub === 'import' && req.method === 'POST') {
-        const body = await parseJsonBody<{ bundle?: unknown }>(req)
-        if (body === undefined) { json(res, { ok: false, error: 'invalid JSON body' }, 400); return }
-        const count = await store.importBundle(path, body.bundle)
-        json(res, { ok: true, imported: count })
+      if (sub === 'history' && segments.length === 1 && req.method === 'GET') {
+        const { value: history, revision } = await store.readConsistent(globalPath, () => store.listHistory(globalPath))
+        json(res, { ok: true, history, revision })
         return
       }
 
-      // ── views ──────────────────────────────────────────────────────────
-      if (sub === 'project' && req.method === 'GET') {
-        const projects = await projectView(ctx)
-        json(res, { ok: true, projects })
-        return
-      }
-      if (sub === 'preset' && req.method === 'GET') {
-        const view = await personaView(ctx)
-        json(res, { ok: true, view })
+      if (sub === 'history' && segments.length === 2 && req.method === 'POST' && segments[1] === 'restore') {
+        const body = await parseJsonBody(req)
+        if (typeof body.id !== 'string') throw new RequestError('BAD_REQUEST', 'id must be a string', 400)
+        const result = await store.restoreHistory(globalPath, body.id, expectedRevision(body))
+        json(res, { ok: true, active: null, ...result })
         return
       }
 
-      res.writeHead(405)
-      res.end()
-    } catch (error: unknown) {
-      ctx.logger.warn(`dsh-custom-instructions: ${String(error)}`)
-      json(res, { ok: false, error: String((error as Error)?.message ?? error) }, 500)
+      if (sub === 'export' && segments.length === 1 && req.method === 'POST') {
+        const { value: bundle, revision } = await store.readConsistent(globalPath, () => store.exportBundle(globalPath))
+        json(res, { ok: true, bundle, revision })
+        return
+      }
+
+      if (sub === 'import' && segments.length === 1 && req.method === 'POST') {
+        const body = await parseJsonBody(req, store.MAX_IMPORT_BYTES)
+        const result = await store.importBundle(globalPath, body.bundle, expectedRevision(body))
+        json(res, { ok: true, revision: result.revision, ...result.summary })
+        return
+      }
+
+      if (sub === 'project' && segments.length === 1 && req.method === 'GET') {
+        json(res, { ok: true, source: 'workspaceRegistry', projects: await projectView(ctx) })
+        return
+      }
+
+      if (sub === 'preset' && segments.length === 1 && req.method === 'GET') {
+        json(res, { ok: true, source: 'agentPresets', ...(await personaView(ctx)) })
+        return
+      }
+
+      fail(res, 404, 'NOT_FOUND', 'route was not found')
+    } catch (error) {
+      handleError(ctx, res, error)
     }
   }
 
-  return [
-    ctx.webServer.register({ kind: 'prefix', path: ROUTE_PREFIX, handler }),
-  ]
+  return [ctx.webServer.register({ kind: 'prefix', path: ROUTE_PREFIX, handler })]
 }
 
-/**
- * Plugin entry. Registers the instruction-center route family.
- * @param ctx - the plugin context (webServer injected).
- */
 export function apply(ctx: Context): void {
   const disposers = registerCustomInstructionsRoutes(ctx)
   ctx.effect(() => () => {

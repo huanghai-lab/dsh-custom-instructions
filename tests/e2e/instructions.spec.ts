@@ -1,72 +1,104 @@
-/**
- * Real-GUI end-to-end smoke test for the custom-instructions settings page.
- *
- * Requires a running DSH Web GUI with this plugin mounted in its web profile
- * (see README 安装). Point E2E_BASE_URL at the GUI, e.g.
- *   E2E_BASE_URL=http://127.0.0.1:60508 pnpm e2e
- * Without the variable the whole suite is skipped — unit tests stay the
- * default verification path.
- *
- * Data safety: the page edits the user's REAL instructions file. The test
- * snapshots the original content up front and always restores it through the
- * HTTP API in a finally block, so a failing assertion can never leave test
- * text in the user's AGENTS.md.
- */
-
 import { expect, test } from '@playwright/test'
+import { mkdir, readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 
-const baseURL = process.env.E2E_BASE_URL
+const API = '/api/dsh-custom-instructions'
 
-test.describe('custom-instructions settings page', () => {
-  test.skip(baseURL === undefined || baseURL === '', 'E2E_BASE_URL not set — set it to a running DSH Web GUI')
+test('runs the complete instruction workflow in an isolated DSH profile', async ({ page }) => {
+  test.setTimeout(120_000)
+  const initial = await (await page.request.get(API)).json() as {
+    ok: boolean
+    path: string
+    text: string
+    revision: string
+  }
+  expect(initial.ok).toBe(true)
+  expect(initial.path).toContain('dsh-custom-instructions-e2e-')
+  expect(initial.text).toBe('')
 
-  test('opens the page, edits, saves, and restores', async ({ page }) => {
-    const api = `${baseURL}/api/dsh-custom-instructions`
+  await page.goto('/')
+  await page.getByRole('button', { name: /继续|Continue/ }).click()
+  await page.getByRole('button', { name: '稍后配置' }).click()
+  await page.getByRole('button', { name: /设置|Settings/ }).click()
+  await page.getByRole('button', { name: '自定义指令', exact: true }).click()
 
-    // Snapshot the user's real content so the finally block can always put it back.
-    const snapshot = await (await page.request.get(api)).json() as { ok: boolean; text?: string }
-    expect(snapshot.ok).toBe(true)
-    const original = snapshot.text ?? ''
+  const globalEditor = page.getByRole('textbox', { name: '全局自定义指令' })
+  await expect(globalEditor).toBeVisible()
+  await globalEditor.fill('# E2E 全局\n\n隔离保存。')
+  await page.getByRole('button', { name: '保存更改' }).click()
+  await expect(page.getByText('已保存。新会话会自动加载这份指令。')).toBeVisible()
 
-    try {
-      await page.goto(baseURL as string)
+  await page.getByRole('button', { name: '预览', exact: true }).first().click()
+  await expect(page.getByRole('heading', { name: 'E2E 全局' })).toBeVisible()
+  await page.getByRole('button', { name: '编辑', exact: true }).first().click()
 
-      // Open the settings panel via the sidebar-foot Settings button. The shell
-      // exposes it with the accessible name "Settings" (snapshot-verified).
-      await page.getByRole('button', { name: 'Settings' }).click()
+  await page.getByRole('textbox', { name: '模板名称' }).fill('E2E 模板')
+  await page.getByRole('button', { name: '从当前内容创建' }).click()
+  const templateEditor = page.getByRole('textbox', { name: '模板 E2E 模板 的内容' })
+  await expect(templateEditor).toBeVisible()
+  await templateEditor.fill('# E2E 模板内容\n\n独立编辑。')
+  await page.getByRole('button', { name: '保存更改' }).last().click()
+  await expect(page.getByText('模板「E2E 模板」已保存。')).toBeVisible()
 
-      // The custom-instructions section sits in the settings nav.
-      await page.getByText('自定义指令', { exact: true }).click()
+  page.once('dialog', (dialog) => dialog.accept())
+  await page.getByRole('button', { name: '激活', exact: true }).click()
+  await expect(page.getByText('已激活模板「E2E 模板」。')).toBeVisible()
+  await expect(globalEditor).toHaveValue('# E2E 模板内容\n\n独立编辑。')
 
-      const textarea = page.locator('textarea[aria-label="自定义指令"]')
-      await expect(textarea).toBeVisible({ timeout: 10_000 })
+  const firstHistory = page.locator('.cinstr-section').filter({ hasText: '版本历史' }).locator('.cinstr-item').first()
+  await firstHistory.getByRole('button', { name: '查看' }).click()
+  await expect(firstHistory.getByText('E2E 全局')).toBeVisible()
 
-      // The editor loads the current instructions (empty or not) — the save
-      // button must become enabled once loaded. Exact name match: "撤销上次保存"
-      // also contains "保存" and would violate strict mode otherwise.
-      const save = page.getByRole('button', { name: '保存', exact: true })
-      await expect(save).toBeEnabled({ timeout: 10_000 })
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByRole('button', { name: '导出全部' }).click()
+  const download = await downloadPromise
+  const downloadPath = await download.path()
+  expect(downloadPath).not.toBeNull()
+  const exported = JSON.parse(await readFile(downloadPath as string, 'utf8')) as {
+    format: string
+    active: string | null
+    templates: Array<{ name: string }>
+    history: unknown[]
+  }
+  expect(exported.format).toBe('dsh-instructions-v2')
+  expect(exported.active).toBe('E2E 模板')
+  expect(exported.templates.some(({ name }) => name === 'E2E 模板')).toBe(true)
+  expect(exported.history.length).toBeGreaterThan(0)
 
-      // The editor should show the same content the API just snapshotted.
-      await expect(textarea).toHaveValue(original)
-
-      // Edit and save.
-      await textarea.fill('e2e 写入测试内容\n')
-      await save.click()
-      await expect(page.getByText('已保存，新会话自动生效')).toBeVisible({ timeout: 10_000 })
-
-      // Restore the previous content through the backup slot.
-      await page.getByRole('button', { name: '撤销上次保存' }).click()
-      await expect(page.getByText('已恢复上次保存前的内容')).toBeVisible({ timeout: 10_000 })
-      await expect(textarea).toHaveValue(original)
-    } finally {
-      // Unconditional restoration through the HTTP API: whatever the test did,
-      // the user's real instructions come back.
-      const restored = await (await page.request.put(api, {
-        data: { text: original },
-        headers: { 'content-type': 'application/json' },
-      })).json() as { ok: boolean }
-      expect(restored.ok).toBe(true)
-    }
+  page.once('dialog', (dialog) => dialog.accept())
+  await page.locator('input[type="file"]').setInputFiles({
+    name: 'instructions.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify({
+      format: 'dsh-instructions-v2',
+      exportedAt: Date.now(),
+      active: '导入模板',
+      current: '# 导入后的全局内容',
+      templates: [{ name: '导入模板', text: '# 导入模板内容' }],
+      history: [],
+    })),
   })
+  await expect(page.getByText(/已导入 \d+ 项并刷新全部数据。/)).toBeVisible()
+  await expect(globalEditor).toHaveValue('# 导入后的全局内容')
+  await expect(page.getByText('导入模板', { exact: true })).toBeVisible()
+
+  const captureAssets = process.env.DSH_CAPTURE_README_ASSETS === '1'
+  if (captureAssets) {
+    await mkdir(join(process.cwd(), 'docs', 'assets'), { recursive: true })
+    await page.getByRole('heading', { name: '全局指令' }).scrollIntoViewIfNeeded()
+    await page.screenshot({ path: join(process.cwd(), 'docs', 'assets', 'settings-zh.png'), animations: 'disabled' })
+  }
+
+  await page.getByRole('button', { name: '通用设置', exact: true }).click()
+  await page.getByRole('button', { name: '中文' }).click()
+  await page.getByRole('menuitem', { name: 'English' }).click()
+  await expect(page.getByText('Custom instructions', { exact: true })).toBeVisible()
+  await page.getByText('Custom instructions', { exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Global instructions' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Instruction templates' })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Global custom instructions' })).toBeVisible()
+  if (captureAssets) {
+    await page.getByRole('heading', { name: 'Global instructions' }).scrollIntoViewIfNeeded()
+    await page.screenshot({ path: join(process.cwd(), 'docs', 'assets', 'settings-en.png'), animations: 'disabled' })
+  }
 })

@@ -1,23 +1,34 @@
-/**
- * Browser-side API client for the /api/dsh-custom-instructions route family.
- * Plain fetch, same origin — the only data path the instruction center uses.
- */
+/** Browser API client for /api/dsh-custom-instructions. */
 
-/** Route prefix the host half serves. */
 export const ROUTE_PREFIX = '/api/dsh-custom-instructions'
 
-/** One instructions read/write response. */
+export class ApiError extends Error {
+  constructor(
+    public readonly code: string,
+    message: string,
+    public readonly status: number,
+  ) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
+
 export interface InstructionsResult {
-  ok: boolean
-  path?: string
-  text?: string
-  error?: string
-  /** UTF-8 byte cap the DSH workspace-instruction loader accepts. */
-  maxBytes?: number
-  /** Active template name, or null when editing freely. */
-  active?: string | null
-  /** Whether a one-generation backup exists. */
-  hasBackup?: boolean
+  ok: true
+  path: string
+  text: string
+  revision: string
+  maxBytes: number
+  maxTemplates: number
+  maxHistory: number
+  maxImportBytes: number
+  active: string | null
+  hasBackup: boolean
+}
+
+export interface MutationResult {
+  ok: true
+  revision: string
 }
 
 export interface TemplateEntry {
@@ -35,7 +46,10 @@ export interface HistoryEntry {
 export interface ProjectEntry {
   path: string
   title: string
+  agentsPath: string
   hasAgents: boolean
+  status: 'present' | 'missing' | 'unreadable'
+  message?: string
 }
 
 export interface PresetView {
@@ -44,7 +58,7 @@ export interface PresetView {
 }
 
 export interface ExportBundle {
-  format: string
+  format?: 'dsh-instructions-v1' | 'dsh-instructions-v2'
   exportedAt: number
   active: string | null
   current: string
@@ -52,84 +66,179 @@ export interface ExportBundle {
   history: Array<{ id: string; text: string }>
 }
 
-/** Parse a JSON response, throwing on non-2xx statuses. */
+export interface ImportResult extends MutationResult {
+  templates: number
+  history: number
+  currentChanged: boolean
+  active: string | null
+  imported: number
+}
+
 async function request(method: string, path: string, body?: unknown): Promise<Record<string, unknown>> {
-  const response = await fetch(`${ROUTE_PREFIX}${path}`, {
-    method,
-    headers: body === undefined ? undefined : { 'content-type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
-  const result = (await response.json()) as Record<string, unknown>
-  if (!response.ok) throw new Error(typeof result.error === 'string' ? result.error : `HTTP ${response.status}`)
+  let response: Response
+  try {
+    response = await fetch(`${ROUTE_PREFIX}${path}`, {
+      method,
+      headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+  } catch (error) {
+    throw new ApiError('NETWORK_ERROR', String((error as Error).message ?? error), 0)
+  }
+
+  const text = await response.text()
+  if (text.trim() === '') {
+    const code = response.ok ? 'EMPTY_RESPONSE' : `HTTP_${response.status}`
+    throw new ApiError(code, response.ok ? 'server returned an empty response' : `HTTP ${response.status}`, response.status)
+  }
+
+  let result: Record<string, unknown>
+  try {
+    const parsed = JSON.parse(text) as unknown
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('not an object')
+    result = parsed as Record<string, unknown>
+  } catch {
+    if (!response.ok) throw new ApiError(`HTTP_${response.status}`, `HTTP ${response.status}: ${text.slice(0, 200)}`, response.status)
+    throw new ApiError('INVALID_RESPONSE', 'server returned a non-JSON response', response.status)
+  }
+
+  if (!response.ok) {
+    const code = typeof result.code === 'string' ? result.code : `HTTP_${response.status}`
+    const message = typeof result.message === 'string' ? result.message : `HTTP ${response.status}`
+    throw new ApiError(code, message, response.status)
+  }
   return result
 }
 
-/** Read the current global instructions (empty string when none exist). */
 export async function readInstructions(): Promise<InstructionsResult> {
   return (await request('GET', '')) as unknown as InstructionsResult
 }
 
-/** Replace the global instructions. */
-export async function writeInstructions(text: string): Promise<InstructionsResult> {
-  return (await request('PUT', '', { text })) as unknown as InstructionsResult
+export async function writeInstructions(text: string, expectedRevision: string): Promise<MutationResult & {
+  hasBackup: boolean
+  active: null
+}> {
+  return (await request('PUT', '', { text, expectedRevision })) as unknown as MutationResult & { hasBackup: boolean; active: null }
 }
 
-/** Restore the one-generation backup (undo the last save). */
-export async function restoreInstructions(): Promise<InstructionsResult> {
-  return (await request('POST', '', { action: 'restore' })) as unknown as InstructionsResult
+export async function restoreInstructions(expectedRevision: string): Promise<MutationResult & {
+  text: string
+  hasBackup: boolean
+  active: null
+}> {
+  return (await request('POST', '', { action: 'restore', expectedRevision })) as unknown as MutationResult & {
+    text: string
+    hasBackup: boolean
+    active: null
+  }
 }
 
-/** List templates plus the active template name. */
-export async function listTemplates(): Promise<{ templates: TemplateEntry[]; active: string | null }> {
-  return (await request('GET', '/templates')) as unknown as { templates: TemplateEntry[]; active: string | null }
+export async function listTemplates(): Promise<{
+  templates: TemplateEntry[]
+  active: string | null
+  revision: string
+}> {
+  return (await request('GET', '/templates')) as unknown as {
+    templates: TemplateEntry[]
+    active: string | null
+    revision: string
+  }
 }
 
-/** Create or update a named template. */
-export async function saveTemplate(name: string, text: string): Promise<void> {
-  await request('POST', '/templates', { name, text })
+export async function saveTemplate(
+  name: string,
+  text: string,
+  expectedRevision: string,
+): Promise<MutationResult> {
+  return (await request('POST', '/templates', { name, text, expectedRevision })) as unknown as MutationResult
 }
 
-/** Read one template. */
-export async function readTemplate(name: string): Promise<{ name: string; text: string }> {
-  return (await request('GET', `/templates/${encodeURIComponent(name)}`)) as unknown as { name: string; text: string }
+export async function updateTemplate(
+  name: string,
+  text: string,
+  expectedRevision: string,
+): Promise<MutationResult> {
+  return (await request('PUT', `/templates/${encodeURIComponent(name)}`, { text, expectedRevision })) as unknown as MutationResult
 }
 
-/** Delete a named template. */
-export async function deleteTemplate(name: string): Promise<void> {
-  await request('DELETE', `/templates/${encodeURIComponent(name)}`)
+export async function readTemplate(name: string): Promise<{
+  name: string
+  text: string
+  revision: string
+}> {
+  return (await request('GET', `/templates/${encodeURIComponent(name)}`)) as unknown as {
+    name: string
+    text: string
+    revision: string
+  }
 }
 
-/** Activate a template (copies it into the global instructions). */
-export async function activateTemplate(name: string): Promise<{ text: string }> {
-  return (await request('POST', '/templates/activate', { name })) as unknown as { text: string }
+export async function deleteTemplate(name: string, expectedRevision: string): Promise<MutationResult & {
+  active: string | null
+}> {
+  return (await request('DELETE', `/templates/${encodeURIComponent(name)}`, { expectedRevision })) as unknown as MutationResult & {
+    active: string | null
+  }
 }
 
-/** List version history (newest first). */
-export async function listHistory(): Promise<{ history: HistoryEntry[] }> {
-  return (await request('GET', '/history')) as unknown as { history: HistoryEntry[] }
+export async function activateTemplate(name: string, expectedRevision: string): Promise<MutationResult & {
+  text: string
+  active: string
+  hasBackup: boolean
+}> {
+  return (await request('POST', '/templates/activate', { name, expectedRevision })) as unknown as MutationResult & {
+    text: string
+    active: string
+    hasBackup: boolean
+  }
 }
 
-/** Restore a history snapshot as the current content. */
-export async function restoreHistory(id: string): Promise<{ text: string }> {
-  return (await request('POST', '/history/restore', { id })) as unknown as { text: string }
+export async function listHistory(): Promise<{ history: HistoryEntry[]; revision: string }> {
+  return (await request('GET', '/history')) as unknown as { history: HistoryEntry[]; revision: string }
 }
 
-/** Project-level instruction overview. */
-export async function projectView(): Promise<{ projects: ProjectEntry[] }> {
-  return (await request('GET', '/project')) as unknown as { projects: ProjectEntry[] }
+export async function readHistory(id: string): Promise<{ id: string; text: string; revision: string }> {
+  return (await request('GET', `/history/${encodeURIComponent(id)}`)) as unknown as {
+    id: string
+    text: string
+    revision: string
+  }
 }
 
-/** Active preset persona overview. */
-export async function presetView(): Promise<{ view: PresetView | null }> {
-  return (await request('GET', '/preset')) as unknown as { view: PresetView | null }
+export async function restoreHistory(id: string, expectedRevision: string): Promise<MutationResult & {
+  text: string
+  active: null
+  hasBackup: boolean
+}> {
+  return (await request('POST', '/history/restore', { id, expectedRevision })) as unknown as MutationResult & {
+    text: string
+    active: null
+    hasBackup: boolean
+  }
 }
 
-/** Export the whole instruction center as a JSON bundle. */
-export async function exportBundle(): Promise<{ bundle: ExportBundle }> {
-  return (await request('POST', '/export', {})) as unknown as { bundle: ExportBundle }
+export async function projectView(): Promise<{ projects: ProjectEntry[]; source: string }> {
+  return (await request('GET', '/project')) as unknown as { projects: ProjectEntry[]; source: string }
 }
 
-/** Import a bundle. */
-export async function importBundle(bundle: unknown): Promise<{ imported: number }> {
-  return (await request('POST', '/import', { bundle })) as unknown as { imported: number }
+export async function presetView(): Promise<{
+  view: PresetView | null
+  available: boolean
+  reason?: string
+  source: string
+}> {
+  return (await request('GET', '/preset')) as unknown as {
+    view: PresetView | null
+    available: boolean
+    reason?: string
+    source: string
+  }
+}
+
+export async function exportBundle(): Promise<{ bundle: ExportBundle; revision: string }> {
+  return (await request('POST', '/export')) as unknown as { bundle: ExportBundle; revision: string }
+}
+
+export async function importBundle(bundle: unknown, expectedRevision: string): Promise<ImportResult> {
+  return (await request('POST', '/import', { bundle, expectedRevision })) as unknown as ImportResult
 }

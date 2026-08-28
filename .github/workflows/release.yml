@@ -1,0 +1,62 @@
+name: release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.21.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - name: Verify tag and committed build
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          test "$GITHUB_REF_NAME" = "v$version"
+          git diff --exit-code -- lib
+
+      - name: Pack and checksum
+        shell: bash
+        run: |
+          mkdir dist
+          pnpm pack --pack-destination dist
+          tarball=$(find dist -maxdepth 1 -name '*.tgz' -print -quit)
+          sha256sum "$tarball" > "$tarball.sha256"
+
+      - name: Publish to npm with provenance
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if ! npm view "@huanghai-lab/dsh-custom-instructions@$version" version >/dev/null 2>&1; then
+            npm publish dist/*.tgz --access public --provenance
+          fi
+          for attempt in 1 2 3 4 5 6; do
+            published=$(npm view @huanghai-lab/dsh-custom-instructions version 2>/dev/null || true)
+            [ "$published" = "$version" ] && exit 0
+            sleep 10
+          done
+          exit 1
+
+      - name: Attach release artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" dist/* --clobber

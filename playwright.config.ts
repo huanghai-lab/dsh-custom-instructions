@@ -1,11 +1,6 @@
 import { defineConfig } from '@playwright/test'
 
-/**
- * Optional real-GUI e2e: runs only when E2E_BASE_URL names a running DSH Web
- * GUI (with this plugin mounted in its web profile). Skipped otherwise — the
- * unit suite does not need a browser.
- */
-const baseURL = process.env.E2E_BASE_URL
+const baseURL = 'http://127.0.0.1:31847'
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -13,8 +8,16 @@ export default defineConfig({
   retries: 0,
   workers: 1,
   reporter: [['list']],
+  webServer: {
+    command: 'node tests/e2e/start-dsh.mjs',
+    url: baseURL,
+    reuseExistingServer: false,
+    timeout: 300_000,
+  },
   use: {
     baseURL,
+    locale: 'zh-CN',
+    actionTimeout: 15_000,
     viewport: { width: 1280, height: 800 },
     trace: 'retain-on-failure',
   },

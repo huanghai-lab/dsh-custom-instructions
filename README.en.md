@@ -1,122 +1,147 @@
 # dsh-custom-instructions
 
-> A "Custom Instructions" editor for the DSH Web GUI — edit the global instruction file that applies to **every chat** on the machine, from a settings page that looks like ChatGPT's Custom Instructions panel.
+[中文](README.md) · [Changelog](CHANGELOG.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md)
 
 [![CI](https://github.com/huanghai-lab/dsh-custom-instructions/actions/workflows/ci.yml/badge.svg)](https://github.com/huanghai-lab/dsh-custom-instructions/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@huanghai-lab/dsh-custom-instructions.svg)](https://www.npmjs.com/package/@huanghai-lab/dsh-custom-instructions)
+[![npm downloads](https://img.shields.io/npm/dm/@huanghai-lab/dsh-custom-instructions.svg)](https://www.npmjs.com/package/@huanghai-lab/dsh-custom-instructions)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-## What it is
+![dsh-custom-instructions social preview](docs/assets/social-preview.png)
 
-Adds a **设置 → 自定义指令** (Settings → Custom Instructions) page to the DSH (DeepSeek Harness) Web GUI:
+A safe instruction manager for DSH Web: edit the global `AGENTS.md`, reuse templates, preview Markdown, restore history, and block silent overwrites when another window or program changes the data.
 
-- A large textarea whose content **is** `~/.dsh/AGENTS.md` — the user-global instruction file loaded automatically into every session.
-- Click **保存** (Save) to write it immediately; new sessions pick it up automatically.
-- The page shows the actual storage path at the bottom.
+> v0.4.0 supports DSH `0.1.1-rc.2` only. Keep using plugin v0.3.0 on older DSH installations.
 
-Just like ChatGPT's Custom Instructions, write the rules you want every conversation to follow — writing style, answer preferences, workflow conventions. All future chats get them automatically.
+## Quick start
+
+Requirements: Node.js `^22.19.0 || >=24.0.0`, pnpm, and DSH `0.1.1-rc.2`.
+
+```bash
+dsh plugin --profile web add @huanghai-lab/dsh-custom-instructions
+dsh web
+```
+
+Restart the Web profile, then open **Settings → Custom instructions**.
+
+![English UI](docs/assets/settings-en.png)
+
+The UI follows the DSH locale and falls back to English. A Chinese screenshot is available at [docs/assets/settings-zh.png](docs/assets/settings-zh.png).
 
 ## Features
 
-| Feature | Description |
+| Feature | v0.4.0 behavior |
 |---|---|
-| Settings page entry | Side bar → Settings → Custom Instructions |
-| Full edit | Edit the whole `~/.dsh/AGENTS.md` file |
-| Instant apply | Save writes the file; new sessions load it (settings hot-reload) |
-| Undo save | Each save rotates the previous content into `AGENTS.md.bak`; "撤销上次保存" restores it in one click |
-| Size guidance | Live char / byte / cap (65 KB) counters; near-limit turns amber, over-limit disables saving |
-| Shortcut | Ctrl/Cmd+S saves |
-| Path aware | Locates AGENTS.md via `$DSH_HOME/settings.yaml`, honors DSH_HOME overrides |
-| Hot-pluggable | `dsh plugin add link:` — no DSH source changes |
+| Global instructions | Save, discard draft, undo last save, edit/Markdown preview; 65 KiB limit |
+| Browser draft | Stored in `sessionStorage` per DSH profile; cleared after save or explicit discard |
+| Conflict protection | Every mutation checks a disk-derived `revision`; conflicts preserve the draft |
+| Templates | Unicode names, independent edit/preview/save, activate, and confirmed delete; up to 50 |
+| History | Snapshot before every replacement, expandable preview and confirmed restore; newest 100 |
+| Import/export | Current content, templates, history, and active state; strict validation and rollback |
+| Environment overview | Read-only project `AGENTS.md` and Persona sources |
+| Accessibility | Keyboard save, focus restoration, ARIA, native dialogs/file picker, responsive layout |
 
-## Install
+Markdown previews use DSH's official `MarkdownText`; the plugin does not ship another Markdown parser.
 
-**Prebuilt (recommended)**: the repository ships the `lib/` build artifacts, so no local build is needed:
+## Data safety
 
-```bash
-# 1. Clone
-git clone https://github.com/huanghai-lab/dsh-custom-instructions.git
-cd dsh-custom-instructions
+- The plugin writes only `$DSH_HOME/AGENTS.md` and its sibling `instructions/` data. Project instructions and Persona remain read-only.
+- Every mutation supplies a SHA-256 `revision` derived from actual disk content. A multi-window or external edit returns `409` instead of being overwritten.
+- Mutations are serialized inside the DSH process. Files are written to a same-directory temporary file, read back for verification, and then replaced.
+- Before replacing global content, the previous value is written to `AGENTS.md.bak` and history. Undo is offered only when the backup truly exists.
+- Imports are fully validated before execution. A failed write restores the pre-import snapshot; the latest snapshot is retained as `instructions/import-rollback.json`.
+- Each content item is limited to 65 KiB. Imports allow at most 50 templates, 100 history entries, and a 16 MiB request body.
+- This plugin adds no product telemetry and does not change DSH's own telemetry setting.
 
-# 2. Mount into the DSH web profile (<profile> is usually web)
-dsh plugin --profile <profile> add link:~/dsh-custom-instructions
+Exports, backups, history, and rollback bundles may contain private instructions or paths. Treat them as sensitive and do not paste them into public issues without redaction.
+
+## Storage layout
+
+```text
+$DSH_HOME/
+├── AGENTS.md
+├── AGENTS.md.bak
+└── instructions/
+    ├── active.json
+    ├── import-rollback.json
+    ├── templates/
+    └── history/
 ```
 
-From source (development / customization):
+Template filenames use Node's native Base64URL encoding. Display names are never appended directly to filesystem paths.
+
+## Upgrade from v0.3.0
 
 ```bash
-pnpm install
+dsh plugin --profile web add @huanghai-lab/dsh-custom-instructions@0.4.0
+```
+
+Export once from v0.3.0 before upgrading. v0.4.0 reads v0.3 ASCII template files and numeric history IDs; a legacy template migrates to the encoded filename on its first successful write. v0.3 exports and bundles without a `format` field are parsed as v0.3 data.
+
+If DSH is not yet `0.1.1-rc.2`, keep the old plugin:
+
+```bash
+dsh plugin --profile web add @huanghai-lab/dsh-custom-instructions@0.3.0
+```
+
+## Import behavior
+
+- Same-name templates are updated; extra local templates are kept. A merged total above 50 is rejected.
+- History is merged by ID and trimmed to the newest 100 entries.
+- Current content and active state are imported. The active template must exist after merging.
+- One invalid field, template, or history entry rejects the entire import.
+- Exports contain saved data only, not an unsaved browser draft.
+
+## Troubleshooting
+
+### “Custom instructions” is missing
+
+Confirm that the package is installed into the `web` profile, then restart DSH:
+
+```bash
+dsh plugin --profile web why @huanghai-lab/dsh-custom-instructions
+dsh web
+```
+
+### The page reports a revision conflict
+
+Choose **Copy draft**, then **Load latest**, merge manually, and save again. Repeated clicks do not bypass the protection.
+
+### The page cannot load or write
+
+Check the displayed storage path, `$DSH_HOME` permissions, and DSH logs. The host distinguishes `400`, `404`, `409`, `413`, and `500`; the client also reports network, empty-response, and non-JSON failures.
+
+### The plugin stopped loading after a DSH upgrade
+
+v0.4.0 guarantees compatibility only with `0.1.1-rc.2`. Check the matrix below instead of rebuilding against an unverified interface.
+
+## Compatibility
+
+| Plugin | DSH | Node.js | Status |
+|---|---|---|---|
+| v0.4.x | `0.1.1-rc.2` | `^22.19.0 || >=24` | Supported |
+| v0.3.0 | `0.1.0-rc.6` | `^22.19.0 || >=24` | Legacy environments |
+
+## Development and verification
+
+```bash
+pnpm install --frozen-lockfile
+pnpm typecheck
+pnpm test
 pnpm build
-# then mount as above
+pnpm e2e
 ```
 
-Uninstall: `dsh plugin --profile <profile> remove custom-instructions`
+`pnpm e2e` installs the pinned official DSH and the current npm tarball under the OS temporary directory, creates an isolated `DSH_HOME` and workspace, then exercises save, preview, templates, history, import/export, and both locales in the real GUI. It never touches the user's real `AGENTS.md`.
 
-### Compatibility and security
+CI runs locked install, typecheck, tests, build, and committed-`lib` freshness on Node 24 for Ubuntu and Windows. Ubuntu also runs the isolated DSH E2E.
 
-- Built against the DSH `0.1.0-rc.6` client APIs (type-level only; devDependencies are pinned exactly). At runtime the package depends only on DSH-provided services (`webServer`) and the `react` peer — no `@deepseek-ai/*` runtime code is inlined. Rebuild with `pnpm build` after a DSH upgrade changes these interfaces.
-- Node.js `^22.19.0 || >=24.0.0`.
-- The editor writes the current user's global `AGENTS.md` through the DSH Web Server. Do not expose the DSH Web GUI to an untrusted network; access control for this route is provided by the DSH Web Server.
+## Community
 
-## Usage
+Use the [issue templates](https://github.com/huanghai-lab/dsh-custom-instructions/issues/new/choose) for reproducible bugs, and [Discussions](https://github.com/huanghai-lab/dsh-custom-instructions/discussions) for usage notes and ideas. Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
-1. Open the DSH Web GUI, click the settings gear at the bottom of the side bar.
-2. Click **自定义指令** in the left nav.
-3. Write or edit instructions in the textarea (e.g. paste in the humanizer-zh rules).
-4. Click **保存** (Save).
-5. Start a new chat — the instructions apply automatically.
-
-## How it works
-
-```
-Browser settings page (src/client)
-   │  GET/PUT /api/dsh-custom-instructions
-   ▼
-Host routes (src/index.ts)
-   │  read/write
-   ▼
-~/.dsh/AGENTS.md  ← auto-loaded into every session by dsh-agent-instructions
-```
-
-- **Host** `src/index.ts`: registers the `/api/dsh-custom-instructions` route family (GET read / PUT write); the file path resolves from the settings document directory.
-- **Client** `src/client/`: registers a `settings.section` entry (id `custom-instructions`, order 25) rendering the editor page.
-
-## Example persistent instructions
-
-Save this and every chat will carry the "remove AI writing artifacts" rule (works great together with [humanizer-zh](https://github.com/op7418/Humanizer-zh)):
-
-```markdown
-在回复前检查一遍文字渲染是否正常。
-默认将 humanizer-zh 用于中文写作、润色、改写以及普通中文回复，
-使表达自然、具体、简洁，避免公式化的 AI 写作痕迹。
-不得因此改动事实、数据、公式、代码、逐字引用或用户指定的格式。
-回答简洁明了并且逻辑清晰，每次回答都要审视，确保不存在逻辑漏洞。
-```
-
-## Layout
-
-```
-├── src/
-│   ├── index.ts                 # Host: /api/dsh-custom-instructions routes
-│   ├── invariant.ts             # no-op invariant (placeholder)
-│   └── client/
-│       ├── index.ts             # Client: registers settings.section
-│       ├── InstructionsSection.tsx  # editor page component
-│       └── api.ts               # fetch client
-├── shared/                      # tsdown client-bundle build preset
-├── cordis.patch.yml             # DSH plugin manifest (bundle patch)
-├── package.json                 # @huanghai-lab/dsh-custom-instructions
-├── tsdown.config.ts             # build config
-└── README.md
-```
-
-## Development
-
-```bash
-pnpm typecheck   # type check
-pnpm build       # tsc declarations + tsdown bundle (lib/index.js + lib/client.js)
-pnpm watch       # incremental build
-```
+If the plugin genuinely helps, a Star, a concrete use case, or a reproducible report all help the project improve.
 
 ## License
 
-Apache-2.0
+[Apache-2.0](LICENSE)

@@ -1,0 +1,62 @@
+name: Bug 报告
+description: 提交可复现的安装、界面或数据问题。
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: 提交前请删除私人指令、令牌和真实路径。安全问题请改用 Private vulnerability reporting。
+  - type: input
+    id: plugin-version
+    attributes:
+      label: 插件版本
+      placeholder: 0.4.0
+    validations:
+      required: true
+  - type: input
+    id: dsh-version
+    attributes:
+      label: DSH 版本
+      placeholder: 0.1.1-rc.2
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 系统与 Node.js
+      placeholder: Windows 11, Node 24.16.0
+    validations:
+      required: true
+  - type: textarea
+    id: install
+    attributes:
+      label: 安装命令
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      description: 请给出最短、稳定的步骤。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期结果
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果与脱敏日志
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: 数据确认
+      options:
+        - label: 我已删除私人指令、令牌和可识别的本地路径。
+          required: true
