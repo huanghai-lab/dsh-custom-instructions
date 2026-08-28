@@ -3,6 +3,15 @@ name: release
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish
+        required: true
+        type: string
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 permissions:
   contents: write
@@ -14,6 +23,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - uses: pnpm/action-setup@v4
         with:
@@ -31,7 +42,7 @@ jobs:
         shell: bash
         run: |
           version=$(node -p "require('./package.json').version")
-          test "$GITHUB_REF_NAME" = "v$version"
+          test "$RELEASE_TAG" = "v$version"
           git diff --exit-code -- lib
 
       - name: Pack and checksum
@@ -47,7 +58,7 @@ jobs:
         run: |
           version=$(node -p "require('./package.json').version")
           if ! npm view "@huanghai-lab/dsh-custom-instructions@$version" version >/dev/null 2>&1; then
-            npm publish dist/*.tgz --access public --provenance
+            npm publish ./dist/*.tgz --access public --provenance
           fi
           for attempt in 1 2 3 4 5 6; do
             published=$(npm view @huanghai-lab/dsh-custom-instructions version 2>/dev/null || true)
@@ -59,4 +70,4 @@ jobs:
       - name: Attach release artifacts
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+        run: gh release upload "$RELEASE_TAG" dist/* --clobber
