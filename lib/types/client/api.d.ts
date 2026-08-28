@@ -1,21 +1,25 @@
-/**
- * Browser-side API client for the /api/dsh-custom-instructions route family.
- * Plain fetch, same origin — the only data path the instruction center uses.
- */
-/** Route prefix the host half serves. */
+/** Browser API client for /api/dsh-custom-instructions. */
 export declare const ROUTE_PREFIX = "/api/dsh-custom-instructions";
-/** One instructions read/write response. */
+export declare class ApiError extends Error {
+    readonly code: string;
+    readonly status: number;
+    constructor(code: string, message: string, status: number);
+}
 export interface InstructionsResult {
-    ok: boolean;
-    path?: string;
-    text?: string;
-    error?: string;
-    /** UTF-8 byte cap the DSH workspace-instruction loader accepts. */
-    maxBytes?: number;
-    /** Active template name, or null when editing freely. */
-    active?: string | null;
-    /** Whether a one-generation backup exists. */
-    hasBackup?: boolean;
+    ok: true;
+    path: string;
+    text: string;
+    revision: string;
+    maxBytes: number;
+    maxTemplates: number;
+    maxHistory: number;
+    maxImportBytes: number;
+    active: string | null;
+    hasBackup: boolean;
+}
+export interface MutationResult {
+    ok: true;
+    revision: string;
 }
 export interface TemplateEntry {
     name: string;
@@ -30,14 +34,17 @@ export interface HistoryEntry {
 export interface ProjectEntry {
     path: string;
     title: string;
+    agentsPath: string;
     hasAgents: boolean;
+    status: 'present' | 'missing' | 'unreadable';
+    message?: string;
 }
 export interface PresetView {
     preset: string;
     persona: string;
 }
 export interface ExportBundle {
-    format: string;
+    format?: 'dsh-instructions-v1' | 'dsh-instructions-v2';
     exportedAt: number;
     active: string | null;
     current: string;
@@ -50,51 +57,69 @@ export interface ExportBundle {
         text: string;
     }>;
 }
-/** Read the current global instructions (empty string when none exist). */
+export interface ImportResult extends MutationResult {
+    templates: number;
+    history: number;
+    currentChanged: boolean;
+    active: string | null;
+    imported: number;
+}
 export declare function readInstructions(): Promise<InstructionsResult>;
-/** Replace the global instructions. */
-export declare function writeInstructions(text: string): Promise<InstructionsResult>;
-/** Restore the one-generation backup (undo the last save). */
-export declare function restoreInstructions(): Promise<InstructionsResult>;
-/** List templates plus the active template name. */
+export declare function writeInstructions(text: string, expectedRevision: string): Promise<MutationResult & {
+    hasBackup: boolean;
+    active: null;
+}>;
+export declare function restoreInstructions(expectedRevision: string): Promise<MutationResult & {
+    text: string;
+    hasBackup: boolean;
+    active: null;
+}>;
 export declare function listTemplates(): Promise<{
     templates: TemplateEntry[];
     active: string | null;
+    revision: string;
 }>;
-/** Create or update a named template. */
-export declare function saveTemplate(name: string, text: string): Promise<void>;
-/** Read one template. */
+export declare function saveTemplate(name: string, text: string, expectedRevision: string): Promise<MutationResult>;
+export declare function updateTemplate(name: string, text: string, expectedRevision: string): Promise<MutationResult>;
 export declare function readTemplate(name: string): Promise<{
     name: string;
     text: string;
+    revision: string;
 }>;
-/** Delete a named template. */
-export declare function deleteTemplate(name: string): Promise<void>;
-/** Activate a template (copies it into the global instructions). */
-export declare function activateTemplate(name: string): Promise<{
+export declare function deleteTemplate(name: string, expectedRevision: string): Promise<MutationResult & {
+    active: string | null;
+}>;
+export declare function activateTemplate(name: string, expectedRevision: string): Promise<MutationResult & {
     text: string;
+    active: string;
+    hasBackup: boolean;
 }>;
-/** List version history (newest first). */
 export declare function listHistory(): Promise<{
     history: HistoryEntry[];
+    revision: string;
 }>;
-/** Restore a history snapshot as the current content. */
-export declare function restoreHistory(id: string): Promise<{
+export declare function readHistory(id: string): Promise<{
+    id: string;
     text: string;
+    revision: string;
 }>;
-/** Project-level instruction overview. */
+export declare function restoreHistory(id: string, expectedRevision: string): Promise<MutationResult & {
+    text: string;
+    active: null;
+    hasBackup: boolean;
+}>;
 export declare function projectView(): Promise<{
     projects: ProjectEntry[];
+    source: string;
 }>;
-/** Active preset persona overview. */
 export declare function presetView(): Promise<{
     view: PresetView | null;
+    available: boolean;
+    reason?: string;
+    source: string;
 }>;
-/** Export the whole instruction center as a JSON bundle. */
 export declare function exportBundle(): Promise<{
     bundle: ExportBundle;
+    revision: string;
 }>;
-/** Import a bundle. */
-export declare function importBundle(bundle: unknown): Promise<{
-    imported: number;
-}>;
+export declare function importBundle(bundle: unknown, expectedRevision: string): Promise<ImportResult>;

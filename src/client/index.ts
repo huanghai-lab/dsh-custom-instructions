@@ -5,30 +5,31 @@
  */
 
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pulls the settings-surface SlotMap merge (the 'settings.section'
 // entry).
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
-import { CSS, CustomInstructionsSection } from './InstructionsSection.tsx'
-
-declare module '@deepseek-ai/dsh-client-ui-slots' {
-  interface SlotMap {
-    'settings.section': {
-      kind: 'list'
-      scope: 'root'
-      owner: { close: () => void }
-    }
-  }
-}
+import {
+  CSS,
+  CustomInstructionsSection,
+  DICTIONARIES,
+  LOCALE_NS,
+} from './InstructionsSection.tsx'
 
 /** Required services. */
-export const inject = ['slots']
+export const inject = ['slots', 'locale']
 
 /**
  * Register the custom-instructions settings page.
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
+  ctx.effect(
+    () => ctx.locale.register(LOCALE_NS, DICTIONARIES),
+    'custom-instructions: locale',
+  )
+
   ctx.effect(() => {
     const style = document.createElement('style')
     style.dataset.plugin = '@huanghai-lab/dsh-custom-instructions'
@@ -37,10 +38,12 @@ export function apply(ctx: ClientContext): void {
     return () => style.remove()
   }, 'custom-instructions: styles')
 
+  const t = ctx.locale.bind(LOCALE_NS)
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section',
     id: 'custom-instructions',
     order: 25,
-    label: '自定义指令',
+    label: () => t('sectionLabel'),
+    locale: LOCALE_NS,
   }, CustomInstructionsSection))
 }

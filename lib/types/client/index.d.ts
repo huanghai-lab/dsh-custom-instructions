@@ -4,17 +4,6 @@
  * instruction file (~/.dsh/AGENTS.md) served by the host route family.
  */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client';
-declare module '@deepseek-ai/dsh-client-ui-slots' {
-    interface SlotMap {
-        'settings.section': {
-            kind: 'list';
-            scope: 'root';
-            owner: {
-                close: () => void;
-            };
-        };
-    }
-}
 /** Required services. */
 export declare const inject: string[];
 /**

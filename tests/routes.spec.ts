@@ -1,404 +1,516 @@
-/**
- * Host route tests: GET/PUT semantics, path resolution, and error handling —
- * exercised through the real node:fs with a fake ctx.webServer registry and a
- * temp-dir settings document so no real ~/.dsh/AGENTS.md is touched.
- */
+/** Route-level tests use a temporary DSH home and never touch the real user. */
 
 import { describe, expect, it } from 'vitest'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
-import { ROUTE_PREFIX, registerCustomInstructionsRoutes } from '../src/index.ts'
+import { join } from 'node:path'
+import { MAX_INSTRUCTIONS_BYTES, ROUTE_PREFIX, registerCustomInstructionsRoutes } from '../src/index.ts'
 
-interface CapturedRequest {
+interface CapturedResponse {
   status: number
   headers: Record<string, string>
   body: string
 }
 
-/** A minimal ctx fulfilling what registerCustomInstructionsRoutes touches. */
-function fakeCtx(settingsDoc: string): {
-  ctx: Record<string, unknown>
-  handler: (method: string, url?: string, body?: string) => Promise<CapturedRequest>
+type Handler = (method: string, url?: string, body?: string) => Promise<CapturedResponse>
+
+function fakeCtx(settingsDoc: string, services: Record<string, unknown> = {}): {
+  handler: Handler
+  warnings: string[]
 } {
-  let handler: ((req: unknown, res: unknown) => Promise<void>) | undefined
+  let routeHandler: ((req: unknown, res: unknown) => Promise<void>) | undefined
+  const warnings: string[] = []
   const ctx = {
-    logger: { warn: () => {} },
+    logger: { warn: (message: string) => warnings.push(message) },
     get: (name: string) => {
       if (name === 'settings') return { prepareDocument: async () => settingsDoc }
-      return undefined
+      return services[name]
     },
     webServer: {
-      register: (row: { kind: string; path: string; handler: (req: unknown, res: unknown) => Promise<void> }) => {
-        handler = row.handler
-        return () => {}
+      register: (row: { handler: (req: unknown, res: unknown) => Promise<void> }) => {
+        routeHandler = row.handler
+        return () => undefined
       },
     },
-    effect: (fn: () => () => void) => { fn(); return () => {} },
+    effect: (fn: () => () => void) => { fn(); return () => undefined },
   }
-  const disposers = registerCustomInstructionsRoutes(ctx as never)
-  if (handler === undefined) throw new Error('route handler was not registered')
-  const captured = handler
-  const disposer = () => { for (const dispose of disposers) dispose() }
+  registerCustomInstructionsRoutes(ctx as never)
+  if (routeHandler === undefined) throw new Error('route handler was not registered')
+  const captured = routeHandler
 
-  const request = async (method: string, url = '', body?: string): Promise<CapturedRequest> => {
+  const handler: Handler = async (method, url = '', body) => {
     let status = 0
     let headers: Record<string, string> = {}
-    let out = ''
+    let output = ''
     const res = {
       writeHead: (code: number, head: Record<string, string> = {}) => { status = code; headers = head },
-      end: (chunk?: unknown) => { if (chunk !== undefined && chunk !== null) out = String(chunk) },
+      end: (chunk?: unknown) => { if (chunk !== undefined && chunk !== null) output = String(chunk) },
     }
-    const req: Record<string, unknown> = { method, url: `${ROUTE_PREFIX}${url}` }
     const events: Record<string, Array<(chunk?: unknown) => void>> = { data: [], end: [], error: [] }
-    req.on = (event: string, listener: (chunk?: unknown) => void) => {
-      events[event]?.push(listener)
-      return req
+    const req: Record<string, unknown> = {
+      method,
+      url: `${ROUTE_PREFIX}${url}`,
+      on: (event: string, listener: (chunk?: unknown) => void) => {
+        events[event]?.push(listener)
+        return req
+      },
     }
-    if ((method === 'PUT' || method === 'POST') && body !== undefined) {
-      const call = (): void => {
-        for (const listener of events.data) listener(Buffer.from(body, 'utf8'))
+    if (method === 'PUT' || method === 'POST' || method === 'DELETE') {
+      setTimeout(() => {
+        if (body !== undefined) for (const listener of events.data) listener(Buffer.from(body, 'utf8'))
         for (const listener of events.end) listener()
-      }
-      // Macro-task deferral: the handler registers its 'data'/'end' listeners
-      // only after its await chain settles, so firing on the microtask queue
-      // would race ahead of registration. A macrotask runs after the handler
-      // has reached `readBody` and installed the listeners.
-      setTimeout(call, 0)
-    } else if (method === 'PUT' || method === 'POST') {
-      setTimeout(() => { for (const listener of events.end) listener() }, 0)
+      }, 0)
     }
     await captured(req as never, res as never)
-    return { status, headers, body: out }
+    return { status, headers, body: output }
   }
-
-  return { ctx, handler: request, ...{ dispose: disposer } } as unknown as { ctx: Record<string, unknown>; handler: typeof request }
+  return { handler, warnings }
 }
 
-/** Parse a JSON envelope body. */
-function envelope(captured: CapturedRequest): Record<string, unknown> {
-  return JSON.parse(captured.body) as Record<string, unknown>
+function envelope(response: CapturedResponse): Record<string, unknown> {
+  return JSON.parse(response.body) as Record<string, unknown>
 }
 
-describe('registerCustomInstructionsRoutes', () => {
-  it('resolves AGENTS.md beside the settings document', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'custinstr-'))
+async function revision(handler: Handler): Promise<string> {
+  const value = envelope(await handler('GET')).revision
+  if (typeof value !== 'string') throw new Error('GET did not return a revision')
+  return value
+}
+
+async function mutate(
+  handler: Handler,
+  method: 'PUT' | 'POST' | 'DELETE',
+  url: string,
+  payload: Record<string, unknown>,
+): Promise<CapturedResponse> {
+  return handler(method, url, JSON.stringify({ ...payload, expectedRevision: await revision(handler) }))
+}
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await access(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+describe('global instructions and concurrency', () => {
+  it('rejects unknown routes and extra path segments', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'custinstr-'))
     try {
-      const { handler } = fakeCtx(join(dir, 'settings.yaml'))
-      const res = await handler('GET')
-      const parsed = envelope(res)
-      expect(parsed.ok).toBe(true)
-      expect(parsed.path).toBe(join(dir, 'AGENTS.md'))
-      expect(parsed.text).toBe('')
+      const { handler } = fakeCtx(join(directory, 'settings.yaml'))
+      for (const url of ['/unknown', '/templates/name/extra', '/history/id/extra']) {
+        const response = await handler('GET', url)
+        expect(response.status).toBe(404)
+        expect(envelope(response).code).toBe('NOT_FOUND')
+      }
     } finally {
-      await rm(dir, { recursive: true, force: true })
+      await rm(directory, { recursive: true, force: true })
     }
   })
 
-  it('GET returns an empty instruction set when the file does not exist', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'custinstr-'))
+  it('reads an absent file as empty and reports truthful limits and revision', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'custinstr-'))
     try {
-      const { handler } = fakeCtx(join(dir, 'settings.yaml'))
-      const res = await handler('GET')
-      const parsed = envelope(res)
-      expect(res.status).toBe(200)
-      expect(parsed.ok).toBe(true)
-      expect(parsed.path).toBe(join(dir, 'AGENTS.md'))
-      expect(parsed.text).toBe('')
-      expect(parsed.maxBytes).toBe(65536)
-      expect(parsed.active).toBeNull()
-      expect(parsed.hasBackup).toBe(false)
+      const { handler } = fakeCtx(join(directory, 'settings.yaml'))
+      const response = await handler('GET')
+      const body = envelope(response)
+      expect(response.status).toBe(200)
+      expect(body).toMatchObject({
+        ok: true,
+        path: join(directory, 'AGENTS.md'),
+        text: '',
+        active: null,
+        hasBackup: false,
+        maxBytes: MAX_INSTRUCTIONS_BYTES,
+        maxTemplates: 50,
+        maxHistory: 100,
+        maxImportBytes: 16 * 1024 * 1024,
+      })
+      expect(body.revision).toMatch(/^[0-9a-f]{64}$/)
     } finally {
-      await rm(dir, { recursive: true, force: true })
+      await rm(directory, { recursive: true, force: true })
     }
   })
 
-  it('GET returns the existing instructions', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'custinstr-'))
+  it('creates no imaginary backup on first save and rotates one on the second', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'custinstr-'))
     try {
-      const path = join(dir, 'AGENTS.md')
-      await writeFile(path, 'line one\nline two\n', 'utf8')
-      const { handler } = fakeCtx(join(dir, 'settings.yaml'))
-      const res = await handler('GET')
-      const parsed = envelope(res)
-      expect(res.status).toBe(200)
-      expect(parsed.text).toBe('line one\nline two\n')
+      const { handler } = fakeCtx(join(directory, 'settings.yaml'))
+      const first = envelope(await mutate(handler, 'PUT', '', { text: '第一版\n' }))
+      expect(first.hasBackup).toBe(false)
+      expect(await exists(join(directory, 'AGENTS.md.bak'))).toBe(false)
+
+      const second = envelope(await mutate(handler, 'PUT', '', { text: '第二版\n' }))
+      expect(second.hasBackup).toBe(true)
+      expect(await readFile(join(directory, 'AGENTS.md.bak'), 'utf8')).toBe('第一版\n')
+      expect(await readFile(join(directory, 'AGENTS.md'), 'utf8')).toBe('第二版\n')
     } finally {
-      await rm(dir, { recursive: true, force: true })
+      await rm(directory, { recursive: true, force: true })
     }
   })
 
-  it('GET surfaces non-ENOENT read failures instead of returning empty text', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'custinstr-'))
+  it('requires a revision, rejects oversized content, and preserves disk state', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'custinstr-'))
     try {
-      // A directory in the file's place: reading it fails with EISDIR.
-      const path = join(dir, 'AGENTS.md')
-      await import('node:fs/promises').then(({ mkdir }) => mkdir(path))
-      const { handler } = fakeCtx(join(dir, 'settings.yaml'))
-      const res = await handler('GET')
-      const parsed = envelope(res)
-      expect(res.status).toBe(500)
-      expect(parsed.ok).toBe(false)
-      expect(typeof parsed.error).toBe('string')
-      expect((parsed.error as string).length).toBeGreaterThan(0)
+      const { handler } = fakeCtx(join(directory, 'settings.yaml'))
+      const missing = await handler('PUT', '', JSON.stringify({ text: 'x' }))
+      expect(missing.status).toBe(400)
+      expect(envelope(missing)).toEqual({
+        code: 'EXPECTED_REVISION_REQUIRED',
+        message: 'expectedRevision must be a SHA-256 revision',
+      })
+
+      const escapedAtLimit = '\0'.repeat(MAX_INSTRUCTIONS_BYTES)
+      const accepted = await mutate(handler, 'PUT', '', { text: escapedAtLimit })
+      expect(accepted.status).toBe(200)
+
+      const oversized = await mutate(handler, 'PUT', '', { text: 'x'.repeat(MAX_INSTRUCTIONS_BYTES + 1) })
+      expect(oversized.status).toBe(413)
+      expect(envelope(oversized).code).toBe('CONTENT_TOO_LARGE')
+      expect(await readFile(join(directory, 'AGENTS.md'), 'utf8')).toBe(escapedAtLimit)
     } finally {
-      await rm(dir, { recursive: true, force: true })
+      await rm(directory, { recursive: true, force: true })
     }
   })
 
-  it('PUT writes the instructions and creates parent directories', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'custinstr-'))
+  it('returns 409 instead of overwriting an external edit', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'custinstr-'))
     try {
-      const { handler } = fakeCtx(join(dir, 'nested', 'settings.yaml'))
-      const res = await handler('PUT', '', JSON.stringify({ text: '写入了新指令\n' }))
-      const parsed = envelope(res)
-      expect(res.status).toBe(200)
-      expect(parsed.ok).toBe(true)
-      const stored = await readFile(join(dir, 'nested', 'AGENTS.md'), 'utf8')
-      expect(stored).toBe('写入了新指令\n')
+      const { handler } = fakeCtx(join(directory, 'settings.yaml'))
+      const stale = await revision(handler)
+      await writeFile(join(directory, 'AGENTS.md'), '外部修改\n', 'utf8')
+      const response = await handler('PUT', '', JSON.stringify({ text: '浏览器旧草稿\n', expectedRevision: stale }))
+      expect(response.status).toBe(409)
+      expect(envelope(response).code).toBe('REVISION_CONFLICT')
+      expect(await readFile(join(directory, 'AGENTS.md'), 'utf8')).toBe('外部修改\n')
     } finally {
-      await rm(dir, { recursive: true, force: true })
+      await rm(directory, { recursive: true, force: true })
     }
   })
 
-  it('PUT rejects an invalid JSON body with 400', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'custinstr-'))
+  it('restores the backup through the same protected write path', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'custinstr-'))
     try {
-      const { handler } = fakeCtx(join(dir, 'settings.yaml'))
-      const res = await handler('PUT', 'not json')
-      const parsed = envelope(res)
-      expect(res.status).toBe(400)
-      expect(parsed.ok).toBe(false)
+      const { handler } = fakeCtx(join(directory, 'settings.yaml'))
+      await mutate(handler, 'PUT', '', { text: '原始内容\n' })
+      await mutate(handler, 'PUT', '', { text: '误改内容\n' })
+      const response = await mutate(handler, 'POST', '', { action: 'restore' })
+      const body = envelope(response)
+      expect(response.status).toBe(200)
+      expect(body.text).toBe('原始内容\n')
+      expect(body.revision).toMatch(/^[0-9a-f]{64}$/)
+      expect(await readFile(join(directory, 'AGENTS.md'), 'utf8')).toBe('原始内容\n')
+      expect(await readFile(join(directory, 'AGENTS.md.bak'), 'utf8')).toBe('误改内容\n')
     } finally {
-      await rm(dir, { recursive: true, force: true })
+      await rm(directory, { recursive: true, force: true })
     }
   })
 
-  it('PUT rejects a non-string text field with 400', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'custinstr-'))
+  it('uses structured errors for malformed JSON, unsupported methods, and read failures', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'custinstr-'))
     try {
-      const { handler } = fakeCtx(join(dir, 'settings.yaml'))
-      const res = await handler('PUT', '', JSON.stringify({ text: 42 }))
-      const parsed = envelope(res)
-      expect(res.status).toBe(400)
-      expect(parsed.ok).toBe(false)
-      expect(parsed.error).toBe('expected { text: string }')
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
+      const { handler } = fakeCtx(join(directory, 'settings.yaml'))
+      const invalid = await handler('PUT', '', 'not-json')
+      expect(invalid.status).toBe(400)
+      expect(envelope(invalid).code).toBe('INVALID_JSON')
 
-  it('answers unsupported methods with 405', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'custinstr-'))
-    try {
-      const { handler } = fakeCtx(join(dir, 'settings.yaml'))
-      const res = await handler('DELETE')
-      expect(res.status).toBe(405)
-      expect(res.body).toBe('')
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
+      const method = await handler('PATCH')
+      expect(method.status).toBe(404)
+      expect(envelope(method).code).toBe('NOT_FOUND')
 
-  it('GET reports the byte cap so the UI can surface the limit', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'custinstr-'))
-    try {
-      const { handler } = fakeCtx(join(dir, 'settings.yaml'))
-      const res = await handler('GET')
-      const parsed = envelope(res)
-      expect(res.status).toBe(200)
-      expect(typeof parsed.maxBytes).toBe('number')
-      expect(parsed.maxBytes as number).toBeGreaterThan(0)
+      await mkdir(join(directory, 'AGENTS.md'))
+      const failedRead = await handler('GET')
+      expect(failedRead.status).toBe(500)
+      expect(envelope(failedRead)).toEqual({ code: 'INTERNAL_ERROR', message: 'unexpected instruction storage error' })
     } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
-
-  it('PUT rotates the previous content into the .bak backup', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'custinstr-'))
-    try {
-      const path = join(dir, 'AGENTS.md')
-      const { handler } = fakeCtx(join(dir, 'settings.yaml'))
-      const first = await handler('PUT', '', JSON.stringify({ text: '第一版内容\n' }))
-      expect(envelope(first).ok).toBe(true)
-      const second = await handler('PUT', '', JSON.stringify({ text: '第二版内容\n' }))
-      expect(envelope(second).ok).toBe(true)
-      expect(await readFile(path, 'utf8')).toBe('第二版内容\n')
-      expect(await readFile(`${path}.bak`, 'utf8')).toBe('第一版内容\n')
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
-
-  it('POST restore recovers the backed-up content and returns it', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'custinstr-'))
-    try {
-      const path = join(dir, 'AGENTS.md')
-      const { handler } = fakeCtx(join(dir, 'settings.yaml'))
-      await handler('PUT', '', JSON.stringify({ text: '原始内容\n' }))
-      await handler('PUT', '', JSON.stringify({ text: '误改的内容\n' }))
-      const res = await handler('POST', '', JSON.stringify({ action: 'restore' }))
-      const parsed = envelope(res)
-      expect(res.status).toBe(200)
-      expect(parsed.ok).toBe(true)
-      expect(parsed.text).toBe('原始内容\n')
-      expect(await readFile(path, 'utf8')).toBe('原始内容\n')
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
-
-  it('POST restore answers 404 when no backup exists', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'custinstr-'))
-    try {
-      const { handler } = fakeCtx(join(dir, 'settings.yaml'))
-      const res = await handler('POST', '', JSON.stringify({ action: 'restore' }))
-      const parsed = envelope(res)
-      expect(res.status).toBe(404)
-      expect(parsed.ok).toBe(false)
-      expect(parsed.error).toBe('no backup available')
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
-
-  it('POST rejects an unknown action with 400', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'custinstr-'))
-    try {
-      const { handler } = fakeCtx(join(dir, 'settings.yaml'))
-      const res = await handler('POST', '', JSON.stringify({ action: 'explode' }))
-      const parsed = envelope(res)
-      expect(res.status).toBe(400)
-      expect(parsed.ok).toBe(false)
-    } finally {
-      await rm(dir, { recursive: true, force: true })
+      await rm(directory, { recursive: true, force: true })
     }
   })
 })
 
-describe('instruction center: templates, history, import/export', () => {
-  it('creates, lists, reads, activates, and deletes a template', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'custinstr-'))
+describe('templates', () => {
+  it('supports Unicode names, encoded filenames, editing, activation, and active deletion', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'custinstr-'))
     try {
-      const { handler } = fakeCtx(join(dir, 'settings.yaml'))
+      const { handler } = fakeCtx(join(directory, 'settings.yaml'))
+      await mutate(handler, 'PUT', '', { text: '当前全局\n' })
+      await mutate(handler, 'POST', '/templates', { name: '论文 写作', text: '模板一\n' })
 
-      const created = await handler('POST', '/templates', JSON.stringify({ name: 'writing', text: '写作规则模板\n' }))
-      expect(envelope(created).ok).toBe(true)
+      const files = await readdir(join(directory, 'instructions', 'templates'))
+      expect(files).toHaveLength(1)
+      expect(files[0]).toMatch(/^b64~[A-Za-z0-9_-]+\.md$/)
 
-      const list = await handler('GET', '/templates')
-      const parsed = envelope(list)
-      expect(parsed.ok).toBe(true)
-      const templates = parsed.templates as Array<{ name: string }>
-      expect(templates.map((entry) => entry.name)).toContain('writing')
-      expect(parsed.active).toBeNull()
+      const read = envelope(await handler('GET', `/templates/${encodeURIComponent('论文 写作')}`))
+      expect(read.text).toBe('模板一\n')
+      await mutate(handler, 'PUT', `/templates/${encodeURIComponent('论文 写作')}`, { text: '模板二\n' })
 
-      const read = await handler('GET', '/templates/writing')
-      const readParsed = envelope(read)
-      expect(readParsed.text).toBe('写作规则模板\n')
+      const activated = envelope(await mutate(handler, 'POST', '/templates/activate', { name: '论文 写作' }))
+      expect(activated).toMatchObject({ active: '论文 写作', text: '模板二\n' })
 
-      const activated = await handler('POST', '/templates/activate', JSON.stringify({ name: 'writing' }))
-      const activatedParsed = envelope(activated)
-      expect(activatedParsed.ok).toBe(true)
-      expect(activatedParsed.text).toBe('写作规则模板\n')
-
-      // Activation copied the template into the global file and marked it active.
-      const globalGet = await handler('GET')
-      const globalParsed = envelope(globalGet)
-      expect(globalParsed.text).toBe('写作规则模板\n')
-      expect(globalParsed.active).toBe('writing')
-
-      const afterList = await handler('GET', '/templates')
-      expect(envelope(afterList).active).toBe('writing')
-
-      const deleted = await handler('DELETE', '/templates/writing')
-      expect(envelope(deleted).ok).toBe(true)
-
-      const finalList = await handler('GET', '/templates')
-      const finalTemplates = envelope(finalList).templates as Array<{ name: string }>
-      expect(finalTemplates).toEqual([])
+      await mutate(handler, 'DELETE', `/templates/${encodeURIComponent('论文 写作')}`, {})
+      const current = envelope(await handler('GET'))
+      expect(current.active).toBeNull()
+      expect(current.text).toBe('模板二\n')
     } finally {
-      await rm(dir, { recursive: true, force: true })
+      await rm(directory, { recursive: true, force: true })
     }
   })
 
-  it('rejects invalid template names', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'custinstr-'))
+  it('reads a v0.3 ASCII template and migrates it on the first edit', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'custinstr-'))
     try {
-      const { handler } = fakeCtx(join(dir, 'settings.yaml'))
-      const res = await handler('POST', '/templates', JSON.stringify({ name: '../evil', text: 'x' }))
-      const parsed = envelope(res)
-      expect(res.status).toBe(500)
-      expect(parsed.ok).toBe(false)
+      const templateDirectory = join(directory, 'instructions', 'templates')
+      await mkdir(templateDirectory, { recursive: true })
+      await writeFile(join(templateDirectory, 'legacy.md'), '旧内容\n', 'utf8')
+      const { handler } = fakeCtx(join(directory, 'settings.yaml'))
+
+      expect((envelope(await handler('GET', '/templates')).templates as Array<{ name: string }>)[0]?.name).toBe('legacy')
+      await mutate(handler, 'PUT', '/templates/legacy', { text: '新内容\n' })
+      expect(await exists(join(templateDirectory, 'legacy.md'))).toBe(false)
+      expect((await readdir(templateDirectory))[0]).toMatch(/^b64~/)
+      expect(envelope(await handler('GET', '/templates/legacy')).text).toBe('新内容\n')
     } finally {
-      await rm(dir, { recursive: true, force: true })
+      await rm(directory, { recursive: true, force: true })
     }
   })
 
-  it('records version history on every save and restores a snapshot', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'custinstr-'))
+  it('does not confuse differently cased legacy names on Windows', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'custinstr-'))
     try {
-      const { handler } = fakeCtx(join(dir, 'settings.yaml'))
-      await handler('PUT', '', JSON.stringify({ text: '第一版\n' }))
-      await handler('PUT', '', JSON.stringify({ text: '第二版\n' }))
-      await handler('PUT', '', JSON.stringify({ text: '第三版\n' }))
+      const templateDirectory = join(directory, 'instructions', 'templates')
+      await mkdir(templateDirectory, { recursive: true })
+      await writeFile(join(templateDirectory, 'Legacy.md'), 'upper-case legacy\n', 'utf8')
+      const { handler } = fakeCtx(join(directory, 'settings.yaml'))
 
-      const list = await handler('GET', '/history')
-      const history = envelope(list).history as Array<{ id: string; savedAt: number }>
-      // First save had nothing to rotate; the next two each left a snapshot.
-      expect(history.length).toBe(2)
-
-      // Restore the oldest snapshot (第一版).
-      const oldest = history[history.length - 1]
-      const restored = await handler('POST', '/history/restore', JSON.stringify({ id: oldest.id }))
-      const restoredParsed = envelope(restored)
-      expect(restoredParsed.ok).toBe(true)
-      expect(restoredParsed.text).toBe('第一版\n')
-
-      const current = await handler('GET')
-      expect(envelope(current).text).toBe('第一版\n')
+      expect((await handler('GET', '/templates/legacy')).status).toBe(404)
+      await mutate(handler, 'POST', '/templates', { name: 'legacy', text: 'lower-case encoded\n' })
+      expect(envelope(await handler('GET', '/templates/Legacy')).text).toBe('upper-case legacy\n')
+      expect(envelope(await handler('GET', '/templates/legacy')).text).toBe('lower-case encoded\n')
     } finally {
-      await rm(dir, { recursive: true, force: true })
+      await rm(directory, { recursive: true, force: true })
     }
   })
 
-  it('answers 404 for a missing history entry', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'custinstr-'))
+  it('rejects invalid names and enforces the 50-template limit without partial writes', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'custinstr-'))
     try {
-      const { handler } = fakeCtx(join(dir, 'settings.yaml'))
-      const res = await handler('POST', '/history/restore', JSON.stringify({ id: '9999999999999' }))
-      const parsed = envelope(res)
-      expect(res.status).toBe(404)
-      expect(parsed.ok).toBe(false)
+      const { handler } = fakeCtx(join(directory, 'settings.yaml'))
+      const invalid = await mutate(handler, 'POST', '/templates', { name: ' bad\nname ', text: 'x' })
+      expect(invalid.status).toBe(400)
+      expect(envelope(invalid).code).toBe('BAD_REQUEST')
+
+      for (let index = 0; index < 50; index += 1) {
+        const response = await mutate(handler, 'POST', '/templates', { name: `template-${index}`, text: `${index}` })
+        expect(response.status).toBe(200)
+      }
+      const overflow = await mutate(handler, 'POST', '/templates', { name: 'template-overflow', text: 'x' })
+      expect(overflow.status).toBe(413)
+      expect(envelope(overflow).code).toBe('LIMIT_EXCEEDED')
+      const templates = envelope(await handler('GET', '/templates')).templates as unknown[]
+      expect(templates).toHaveLength(50)
     } finally {
-      await rm(dir, { recursive: true, force: true })
+      await rm(directory, { recursive: true, force: true })
+    }
+  }, 30_000)
+})
+
+describe('history', () => {
+  it('creates collision-proof IDs, previews content, and restores through a fresh revision', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'custinstr-'))
+    try {
+      const { handler } = fakeCtx(join(directory, 'settings.yaml'))
+      await mutate(handler, 'PUT', '', { text: '第一版\n' })
+      await mutate(handler, 'PUT', '', { text: '第二版\n' })
+      await mutate(handler, 'PUT', '', { text: '第三版\n' })
+
+      const history = envelope(await handler('GET', '/history')).history as Array<{ id: string; savedAt: number }>
+      expect(history).toHaveLength(2)
+      expect(new Set(history.map(({ id }) => id)).size).toBe(2)
+      expect(history.every(({ id }) => /^\d{13}-[0-9a-f-]{36}$/i.test(id))).toBe(true)
+
+      const oldest = history.at(-1)
+      if (oldest === undefined) throw new Error('missing history')
+      const preview = envelope(await handler('GET', `/history/${oldest.id}`))
+      expect(preview.text).toBe('第一版\n')
+      const restored = envelope(await mutate(handler, 'POST', '/history/restore', { id: oldest.id }))
+      expect(restored.text).toBe('第一版\n')
+      expect(envelope(await handler('GET')).active).toBeNull()
+    } finally {
+      await rm(directory, { recursive: true, force: true })
     }
   })
 
-  it('exports and imports the whole instruction center', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'custinstr-'))
+  it('keeps only the newest 100 entries', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'custinstr-'))
     try {
-      const { handler } = fakeCtx(join(dir, 'settings.yaml'))
-      await handler('PUT', '', JSON.stringify({ text: '当前内容\n' }))
-      await handler('POST', '/templates', JSON.stringify({ name: 'tpl', text: '模板内容\n' }))
-
-      const exported = await handler('POST', '/export')
-      const exportedParsed = envelope(exported)
-      const bundle = exportedParsed.bundle as { format: string; templates: unknown[] }
-      expect(exportedParsed.ok).toBe(true)
-      expect(bundle.format).toBe('dsh-instructions-v1')
-      expect(bundle.templates.length).toBe(1)
-
-      // Wipe and re-import.
-      await handler('DELETE', '/templates/tpl')
-      const imported = await handler('POST', '/import', JSON.stringify({ bundle }))
-      const importedParsed = envelope(imported)
-      expect(importedParsed.ok).toBe(true)
-      expect(importedParsed.imported).toBeGreaterThanOrEqual(1)
-
-      const list = await handler('GET', '/templates')
-      expect((envelope(list).templates as Array<{ name: string }>).map((entry) => entry.name)).toContain('tpl')
+      await writeFile(join(directory, 'AGENTS.md'), 'current\n', 'utf8')
+      const historyDirectory = join(directory, 'instructions', 'history')
+      await mkdir(historyDirectory, { recursive: true })
+      for (let index = 0; index < 105; index += 1) {
+        await writeFile(join(historyDirectory, `${1_700_000_000_000 + index}.md`), `${index}`, 'utf8')
+      }
+      const { handler } = fakeCtx(join(directory, 'settings.yaml'))
+      await mutate(handler, 'PUT', '', { text: 'next\n' })
+      const history = envelope(await handler('GET', '/history')).history as unknown[]
+      expect(history).toHaveLength(100)
     } finally {
-      await rm(dir, { recursive: true, force: true })
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('import and export', () => {
+  it('merges a v0.3 bundle, imports current and active state, and leaves a rollback bundle', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'custinstr-'))
+    try {
+      const { handler } = fakeCtx(join(directory, 'settings.yaml'))
+      await mutate(handler, 'PUT', '', { text: '本地当前\n' })
+      await mutate(handler, 'POST', '/templates', { name: '本地模板', text: '保留我\n' })
+      const bundle = {
+        exportedAt: Date.now(),
+        active: '导入模板',
+        current: '导入当前\n',
+        templates: [{ name: '导入模板', text: '导入模板内容\n' }],
+        history: [{ id: '1700000000000', text: '导入历史\n' }],
+      }
+      const imported = envelope(await mutate(handler, 'POST', '/import', { bundle }))
+      expect(imported).toMatchObject({ templates: 1, history: 1, currentChanged: true, active: '导入模板', imported: 3 })
+
+      const current = envelope(await handler('GET'))
+      expect(current).toMatchObject({ text: '导入当前\n', active: '导入模板', hasBackup: true })
+      expect(await readFile(join(directory, 'AGENTS.md.bak'), 'utf8')).toBe('本地当前\n')
+      const names = (envelope(await handler('GET', '/templates')).templates as Array<{ name: string }>).map(({ name }) => name)
+      expect(names).toEqual(expect.arrayContaining(['本地模板', '导入模板']))
+      expect(await exists(join(directory, 'instructions', 'import-rollback.json'))).toBe(true)
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('validates the complete bundle before writing anything', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'custinstr-'))
+    try {
+      const { handler } = fakeCtx(join(directory, 'settings.yaml'))
+      const bundle = {
+        format: 'dsh-instructions-v1',
+        exportedAt: Date.now(),
+        active: null,
+        current: 'new current',
+        templates: [
+          { name: 'valid', text: 'would be written first' },
+          { name: ' invalid ', text: 'bad' },
+        ],
+        history: [],
+      }
+      const response = await mutate(handler, 'POST', '/import', { bundle })
+      expect(response.status).toBe(400)
+      expect(envelope(response).code).toBe('BAD_REQUEST')
+      expect(envelope(await handler('GET')).text).toBe('')
+      expect(envelope(await handler('GET', '/templates')).templates).toEqual([])
+
+      const invalidTimestamp = await mutate(handler, 'POST', '/import', {
+        bundle: { ...bundle, exportedAt: 'today', templates: [] },
+      })
+      expect(invalidTimestamp.status).toBe(400)
+      expect(envelope(invalidTimestamp).code).toBe('BAD_REQUEST')
+      expect(envelope(await handler('GET')).text).toBe('')
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a missing active template and bundle limits', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'custinstr-'))
+    try {
+      const { handler } = fakeCtx(join(directory, 'settings.yaml'))
+      const missingActive = {
+        format: 'dsh-instructions-v2',
+        exportedAt: Date.now(),
+        active: 'missing',
+        current: '',
+        templates: [],
+        history: [],
+      }
+      const missing = await mutate(handler, 'POST', '/import', { bundle: missingActive })
+      expect(missing.status).toBe(400)
+
+      const tooMany = {
+        ...missingActive,
+        active: null,
+        templates: Array.from({ length: 51 }, (_, index) => ({ name: `t-${index}`, text: '' })),
+      }
+      const limited = await mutate(handler, 'POST', '/import', { bundle: tooMany })
+      expect(limited.status).toBe(413)
+      expect(envelope(limited).code).toBe('LIMIT_EXCEEDED')
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('exports the compatible v2 field layout with a revision', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'custinstr-'))
+    try {
+      const { handler } = fakeCtx(join(directory, 'settings.yaml'))
+      await mutate(handler, 'PUT', '', { text: '当前\n' })
+      const response = envelope(await handler('POST', '/export'))
+      expect(response.revision).toMatch(/^[0-9a-f]{64}$/)
+      expect(response.bundle).toMatchObject({
+        format: 'dsh-instructions-v2',
+        active: null,
+        current: '当前\n',
+        templates: [],
+        history: [],
+      })
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects request bodies larger than 16 MiB', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'custinstr-'))
+    try {
+      const { handler } = fakeCtx(join(directory, 'settings.yaml'))
+      const body = JSON.stringify({
+        expectedRevision: await revision(handler),
+        padding: 'x'.repeat(16 * 1024 * 1024),
+      })
+      const response = await handler('POST', '/import', body)
+      expect(response.status).toBe(413)
+      expect(envelope(response).code).toBe('PAYLOAD_TOO_LARGE')
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  }, 30_000)
+})
+
+describe('read-only overview', () => {
+  it('distinguishes present, missing, and unreadable project instructions', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'custinstr-'))
+    try {
+      const present = join(directory, 'present')
+      const missing = join(directory, 'missing')
+      const unreadable = join(directory, 'unreadable')
+      await mkdir(present)
+      await mkdir(missing)
+      await mkdir(join(unreadable, 'AGENTS.md'), { recursive: true })
+      await writeFile(join(present, 'AGENTS.md'), '# Rules\n', 'utf8')
+      const workspaces = [present, missing, unreadable].map((path) => ({ id: path, path, title: path.split(/[\\/]/).at(-1) ?? path }))
+      const { handler } = fakeCtx(join(directory, 'settings.yaml'), {
+        workspaceRegistry: { list: () => workspaces },
+        agentPresets: {
+          resolve: async () => ({ id: 'default' }),
+          read: async () => '- id: persona\n  text: |-\n    precise and calm\n- id: tools\n',
+        },
+      })
+      const projects = envelope(await handler('GET', '/project')).projects as Array<{ status: string }>
+      expect(projects.map(({ status }) => status)).toEqual(['present', 'missing', 'unreadable'])
+
+      const preset = envelope(await handler('GET', '/preset'))
+      expect(preset).toMatchObject({ available: true, view: { preset: 'default', persona: 'precise and calm' } })
+    } finally {
+      await rm(directory, { recursive: true, force: true })
     }
   })
 })

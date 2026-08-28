@@ -1,8 +1,9 @@
 {
   "name": "@huanghai-lab/dsh-custom-instructions",
-  "description": "Custom instructions editor for the DSH web GUI: a settings page (side bar → 设置 → 自定义指令) that edits the global instruction file ~/.dsh/AGENTS.md, applied to every chat on the machine. Hot-pluggable — mounted via ~/.dsh/cordis.patch.yml + a profile node_modules symlink, no dsh source changes.",
-  "version": "0.3.0",
+  "description": "Safe custom-instructions manager for the DSH web GUI with templates, Markdown preview, history, rollback, and portable import/export.",
+  "version": "0.4.0",
   "type": "module",
+  "packageManager": "pnpm@11.21.0",
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
   },
@@ -31,7 +32,9 @@
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-runtime",
-        "@deepseek-ai/dsh-client-ui-settings"
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-primitives"
       ],
       "platform": "web"
     }
@@ -42,18 +45,21 @@
     "watch": "tsdown --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "node tests/e2e/run.mjs",
+    "check": "pnpm typecheck && pnpm test && pnpm build"
   },
   "peerDependencies": {
     "react": "^18.2.0"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.1",
-    "@deepseek-ai/dsh-client-runtime": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-settings": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-slots": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-host-webserver": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-settings": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-locale": "0.1.1-rc.2",
+    "@deepseek-ai/dsh-client-runtime": "0.1.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-primitives": "0.1.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-settings": "0.1.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-slots": "0.1.1-rc.2",
+    "@deepseek-ai/dsh-host-webserver": "0.1.1-rc.2",
+    "@deepseek-ai/dsh-settings": "0.1.1-rc.2",
     "@playwright/test": "^1.49.0",
     "@types/node": "^22.20.1",
     "@types/react": "~18.3.1",
@@ -61,6 +67,7 @@
     "jsdom": "29.1.1",
     "lightningcss": "^1.33.0",
     "react": "^18.2.0",
+    "react-dom": "^18.3.1",
     "tsdown": "0.22.2",
     "typescript": "^6.0.3",
     "vite-tsconfig-paths": "^6.1.1",
@@ -75,6 +82,18 @@
     "cordis.patch.yml"
   ],
   "license": "Apache-2.0",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "agents-md",
+    "custom-instructions",
+    "prompt-management"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "homepage": "https://github.com/huanghai-lab/dsh-custom-instructions#readme",
   "bugs": {
     "url": "https://github.com/huanghai-lab/dsh-custom-instructions/issues"
