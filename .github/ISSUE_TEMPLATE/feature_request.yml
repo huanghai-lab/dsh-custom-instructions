@@ -1,0 +1,35 @@
+name: 功能建议
+description: 描述真实场景、现有阻碍和最小可行改进。
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 使用场景
+      description: 谁在什么情况下遇到了什么问题？
+    validations:
+      required: true
+  - type: textarea
+    id: workaround
+    attributes:
+      label: 当前做法
+      description: 现在如何处理，为什么不够？
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议的最小改进
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: 涉及范围
+      options:
+        - DSH 内的指令管理
+        - 安装、迁移或文档
+        - 跨工具支持
+    validations:
+      required: true
