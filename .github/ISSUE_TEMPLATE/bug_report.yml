@@ -17,7 +17,7 @@ body:
     id: dsh-version
     attributes:
       label: DSH 版本
-      placeholder: 0.1.1-rc.2
+      placeholder: 0.1.2-alpha.1 或 0.1.1-rc.2
     validations:
       required: true
   - type: input

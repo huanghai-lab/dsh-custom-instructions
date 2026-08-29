@@ -6,7 +6,20 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CustomInstructionsSection, DICTIONARIES } from '../src/client/InstructionsSection.tsx'
 
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
-  MarkdownText: ({ text }: { text: string }) => <div data-markdown="true">{text}</div>,
+  MarkdownText: ({ text, codeLabels, labels }: {
+    text: string
+    codeLabels?: { copyLabel: string; copiedLabel: string }
+    labels?: { code: { copyLabel: string; copiedLabel: string }; footnotes: string }
+  }) => (
+    <div
+      data-markdown="true"
+      data-code-copy={labels?.code.copyLabel ?? codeLabels?.copyLabel}
+      data-code-copied={labels?.code.copiedLabel ?? codeLabels?.copiedLabel}
+      data-footnotes={labels?.footnotes}
+    >
+      {text}
+    </div>
+  ),
 }))
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -87,7 +100,11 @@ describe('settings page', () => {
     expect(text.indexOf('Version history')).toBeLessThan(text.indexOf('Environment overview'))
 
     await act(async () => button(container, 'Preview').click())
-    expect(container.querySelector('[data-markdown="true"]')?.textContent).toBe('# Saved')
+    const markdown = container.querySelector('[data-markdown="true"]')
+    expect(markdown?.textContent).toBe('# Saved')
+    expect(markdown?.getAttribute('data-code-copy')).toBe('Copy code')
+    expect(markdown?.getAttribute('data-code-copied')).toBe('Copied')
+    expect(markdown?.getAttribute('data-footnotes')).toBe('Footnotes')
   })
 
   it('restores a profile-scoped browser draft without changing saved content', async () => {

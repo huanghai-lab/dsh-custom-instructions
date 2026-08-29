@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### Changed
+
+- 适配 DSH `0.1.2-alpha.1`：客户端上下文改用 Cordis，移除已删除的 `dsh-client-runtime` 注入，并同步新的浏览器平台模块表。
+- Markdown 预览同时提供新版 `labels` 与旧版 `codeLabels`，补齐代码复制和脚注的中英文文案。
+- 自定义路由接入新版 Connection 的 Host/Origin 与浏览器 Cookie 鉴权，未登录请求不再能读取私有指令。
+
+### Validation
+
+- CI 从官方 `dsh-v0.1.2-alpha.1` 标签检出并构建源码，校验插件依赖接口和类型，再在隔离 `DSH_HOME` 中运行带一次性登录的真实浏览器 E2E。
+
 ## [0.4.0] - 2026-08-28
 
 ### Added

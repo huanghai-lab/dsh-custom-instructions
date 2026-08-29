@@ -12,6 +12,9 @@ declare const zh: {
     readonly edit: "编辑";
     readonly preview: "预览";
     readonly emptyPreview: "暂无可预览内容。";
+    readonly markdownCopy: "复制代码";
+    readonly markdownCopied: "已复制";
+    readonly markdownFootnotes: "脚注";
     readonly globalAria: "全局自定义指令";
     readonly globalPlaceholder: "输入对所有新会话生效的指令…";
     readonly save: "保存更改";
@@ -114,6 +117,9 @@ export declare const DICTIONARIES: {
         readonly edit: "编辑";
         readonly preview: "预览";
         readonly emptyPreview: "暂无可预览内容。";
+        readonly markdownCopy: "复制代码";
+        readonly markdownCopied: "已复制";
+        readonly markdownFootnotes: "脚注";
         readonly globalAria: "全局自定义指令";
         readonly globalPlaceholder: "输入对所有新会话生效的指令…";
         readonly save: "保存更改";
@@ -203,7 +209,7 @@ export declare const DICTIONARIES: {
         readonly itemMeta: "{size} · {time}";
         readonly previewFailed: "内容预览失败：{message}";
     };
-    en: Record<"present" | "missing" | "unreadable" | "view" | "close" | "restore" | "activate" | "sectionLabel" | "globalEyebrow" | "globalTitle" | "globalDesc" | "loading" | "loadFailed" | "retry" | "edit" | "preview" | "emptyPreview" | "globalAria" | "globalPlaceholder" | "save" | "saving" | "discard" | "undo" | "undoing" | "unsaved" | "bytesCount" | "overLimit" | "nearLimit" | "savedNotice" | "discardedNotice" | "undoNotice" | "storagePath" | "activeTemplate" | "manualMode" | "confirmUndo" | "templatesEyebrow" | "templatesTitle" | "templatesDesc" | "noTemplates" | "templateName" | "templateNamePlaceholder" | "createFromCurrent" | "creating" | "openTemplate" | "closeTemplate" | "delete" | "currentActive" | "templateEditorTitle" | "templateAria" | "templateSaved" | "templateCreated" | "templateActivated" | "templateDeleted" | "confirmActivate" | "confirmDelete" | "discardWarning" | "exportAll" | "exported" | "exportSavedOnly" | "importAll" | "importTooLarge" | "invalidJson" | "confirmImport" | "currentWillChange" | "currentWillStay" | "imported" | "historyEyebrow" | "historyTitle" | "historyDesc" | "noHistory" | "confirmRestore" | "historyRestored" | "overviewEyebrow" | "overviewTitle" | "overviewDesc" | "projectTitle" | "projectSource" | "noProjects" | "personaTitle" | "personaSource" | "noPersonaService" | "noPersona" | "officialDocs" | "footer" | "refresh" | "refreshing" | "conflictTitle" | "conflictBody" | "copyDraft" | "reloadLatest" | "draftCopied" | "copyFailed" | "latestLoaded" | "draftRecovered" | "failed" | "nameInvalid" | "itemMeta" | "previewFailed", string>;
+    en: Record<"present" | "missing" | "unreadable" | "view" | "close" | "restore" | "activate" | "sectionLabel" | "globalEyebrow" | "globalTitle" | "globalDesc" | "loading" | "loadFailed" | "retry" | "edit" | "preview" | "emptyPreview" | "markdownCopy" | "markdownCopied" | "markdownFootnotes" | "globalAria" | "globalPlaceholder" | "save" | "saving" | "discard" | "undo" | "undoing" | "unsaved" | "bytesCount" | "overLimit" | "nearLimit" | "savedNotice" | "discardedNotice" | "undoNotice" | "storagePath" | "activeTemplate" | "manualMode" | "confirmUndo" | "templatesEyebrow" | "templatesTitle" | "templatesDesc" | "noTemplates" | "templateName" | "templateNamePlaceholder" | "createFromCurrent" | "creating" | "openTemplate" | "closeTemplate" | "delete" | "currentActive" | "templateEditorTitle" | "templateAria" | "templateSaved" | "templateCreated" | "templateActivated" | "templateDeleted" | "confirmActivate" | "confirmDelete" | "discardWarning" | "exportAll" | "exported" | "exportSavedOnly" | "importAll" | "importTooLarge" | "invalidJson" | "confirmImport" | "currentWillChange" | "currentWillStay" | "imported" | "historyEyebrow" | "historyTitle" | "historyDesc" | "noHistory" | "confirmRestore" | "historyRestored" | "overviewEyebrow" | "overviewTitle" | "overviewDesc" | "projectTitle" | "projectSource" | "noProjects" | "personaTitle" | "personaSource" | "noPersonaService" | "noPersona" | "officialDocs" | "footer" | "refresh" | "refreshing" | "conflictTitle" | "conflictBody" | "copyDraft" | "reloadLatest" | "draftCopied" | "copyFailed" | "latestLoaded" | "draftRecovered" | "failed" | "nameInvalid" | "itemMeta" | "previewFailed", string>;
 };
 declare module '@deepseek-ai/dsh-client-ui-slots' {
     interface LocaleNamespaceMap {

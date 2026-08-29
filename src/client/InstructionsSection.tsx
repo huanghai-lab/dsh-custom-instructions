@@ -42,6 +42,9 @@ const zh = {
   edit: '编辑',
   preview: '预览',
   emptyPreview: '暂无可预览内容。',
+  markdownCopy: '复制代码',
+  markdownCopied: '已复制',
+  markdownFootnotes: '脚注',
   globalAria: '全局自定义指令',
   globalPlaceholder: '输入对所有新会话生效的指令…',
   save: '保存更改',
@@ -145,6 +148,9 @@ const en: Record<TranslationKey, string> = {
   edit: 'Edit',
   preview: 'Preview',
   emptyPreview: 'Nothing to preview yet.',
+  markdownCopy: 'Copy code',
+  markdownCopied: 'Copied',
+  markdownFootnotes: 'Footnotes',
   globalAria: 'Global custom instructions',
   globalPlaceholder: 'Enter instructions for every new chat…',
   save: 'Save changes',
@@ -397,10 +403,38 @@ function ModeTabs(props: { mode: EditorMode; setMode: (mode: EditorMode) => void
   )
 }
 
+interface MarkdownCodeLabelsCompat {
+  copyLabel: string
+  copiedLabel: string
+}
+
+interface MarkdownLabelsCompat {
+  code: MarkdownCodeLabelsCompat
+  footnotes: string
+}
+
+/**
+ * DSH 0.1.1-rc.2 accepts `codeLabels`; 0.1.2-alpha.1 replaces it with the
+ * required `labels` object. Supplying both keeps previews working across the
+ * upstream transition.
+ */
+const CompatibleMarkdownText = MarkdownText as unknown as (props: {
+  text: string
+  codeLabels: MarkdownCodeLabelsCompat
+  labels: MarkdownLabelsCompat
+}) => JSX.Element
+
 function MarkdownPreview(props: { text: string; compact?: boolean; t: T }): JSX.Element {
+  const codeLabels = {
+    copyLabel: props.t('markdownCopy'),
+    copiedLabel: props.t('markdownCopied'),
+  }
+  const labels = { code: codeLabels, footnotes: props.t('markdownFootnotes') }
   return (
     <div className={props.compact === true ? 'cinstr-preview cinstr-preview-small' : 'cinstr-preview'}>
-      {props.text.trim() === '' ? <p className="cinstr-empty">{props.t('emptyPreview')}</p> : <MarkdownText text={props.text} />}
+      {props.text.trim() === ''
+        ? <p className="cinstr-empty">{props.t('emptyPreview')}</p>
+        : <CompatibleMarkdownText text={props.text} codeLabels={codeLabels} labels={labels} />}
     </div>
   )
 }

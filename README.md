@@ -13,6 +13,8 @@ DSH Web 的安全指令管理器：编辑全局 `AGENTS.md`，复用模板，预
 
 > v0.4.0 仅适配 DSH `0.1.1-rc.2`。仍在使用旧版 DSH 时，请继续使用本插件 v0.3.0。
 
+> 当前 `Unreleased` 已同步官方源码标签 [`dsh-v0.1.2-alpha.1`](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.2-alpha.1)，并通过官方标签源码构建、插件 tarball 隔离安装与真实浏览器 E2E。上游尚未把该预览版发布到 npm，因此普通用户仍应按下方说明使用已发布的 v0.4.0 与 DSH `0.1.1-rc.2`。
+
 ## 快速开始
 
 前提：Node.js `^22.19.0 || >=24.0.0`、pnpm，以及已安装的 DSH `0.1.1-rc.2`。
@@ -113,13 +115,14 @@ dsh web
 
 ### DSH 升级后插件无法加载
 
-v0.4.0 只承诺兼容 `0.1.1-rc.2`。请先查看[兼容矩阵](#兼容矩阵)，不要用重新构建来掩盖接口不兼容。
+已发布的 v0.4.0 只承诺兼容 `0.1.1-rc.2`。当前开发分支已移除 `0.1.2-alpha.1` 删除的客户端 runtime 依赖，适配新版 Markdown 标签和浏览器鉴权接口，并已在官方标签源码构建中完成隔离安装验证。
 
 ## 兼容矩阵
 
 | 插件版本 | DSH | Node.js | 状态 |
 |---|---|---|---|
-| v0.4.x | `0.1.1-rc.2` | `^22.19.0 || >=24` | 当前支持 |
+| Unreleased | `0.1.2-alpha.1` | `^22.19.0 || >=24` | 官方标签源码构建、插件 tarball 隔离安装与真实浏览器 E2E 已通过；等待上游 npm 包 |
+| v0.4.0 | `0.1.1-rc.2` | `^22.19.0 || >=24` | 已发布并通过隔离安装 E2E |
 | v0.3.0 | `0.1.0-rc.6` | `^22.19.0 || >=24` | 旧环境保留 |
 
 ## 开发与验证
@@ -129,12 +132,16 @@ pnpm install --frozen-lockfile
 pnpm typecheck
 pnpm test
 pnpm build
-pnpm e2e
+pnpm compat:dsh /path/to/deepseek-harness
+pnpm typecheck:dsh-source /path/to/deepseek-harness
+pnpm e2e -- /path/to/deepseek-harness
 ```
 
-`pnpm e2e` 会在系统临时目录安装固定版本的官方 DSH 和当前 npm tarball，创建隔离的 `DSH_HOME` 与 workspace，再真实验证保存、预览、模板、历史、导入导出和中英文界面。它不会接触用户真实的 `AGENTS.md`。
+先在官方 `dsh-v0.1.2-alpha.1` 源码目录完成锁定安装与构建。`pnpm e2e -- <源码目录>` 会使用该构建和当前插件 tarball，在系统临时目录创建隔离的 `DSH_HOME` 与 workspace，再真实验证一次性登录、保存、预览、模板、历史、导入导出和中英文界面。它不会接触用户真实的 `AGENTS.md`。
 
-CI 在 Ubuntu 与 Windows 的 Node 24 上执行锁定安装、类型检查、测试和构建，并检查提交的 `lib/` 没有落后源码；Ubuntu 还会执行隔离 DSH E2E。
+`pnpm compat:dsh` 校验 DSH 源码目录中的客户端 Context、Markdown、设置页、工作区、Persona 和 Web 路由接口。CI 会直接检出官方 `dsh-v0.1.2-alpha.1` 标签执行这项检查。
+
+CI 在 Ubuntu 与 Windows 的 Node 24 上执行锁定安装、类型检查、测试和构建，并检查提交的 `lib/` 没有落后源码；Ubuntu 还会构建官方 alpha 标签、执行源码类型检查和隔离浏览器 E2E。上游 npm 包可安装后，仍需补跑一次 npm 安装链路复核发布物。
 
 ## 参与项目
 

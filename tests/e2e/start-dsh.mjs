@@ -1,19 +1,22 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const DSH_VERSION = '0.1.1-rc.2'
+const EXPECTED_DSH_VERSION = '0.1.2-alpha.1'
+const dshSourceRoot = process.env.DSH_E2E_SOURCE_ROOT
 const PORT = '31847'
 const repository = process.cwd()
 const pnpmCli = process.env.npm_execpath
 const runId = process.env.DSH_E2E_RUN_ID
+const authFile = process.env.DSH_E2E_AUTH_FILE
 
 if (!pnpmCli) throw new Error('run this fixture through pnpm e2e')
 if (!/^[0-9a-f-]{36}$/i.test(runId ?? '')) throw new Error('DSH_E2E_RUN_ID is missing or invalid')
+if (authFile === undefined || authFile.length === 0) throw new Error('DSH_E2E_AUTH_FILE is missing')
+if (dshSourceRoot === undefined || dshSourceRoot.length === 0) throw new Error('DSH_E2E_SOURCE_ROOT is missing')
 
 const fixture = await mkdtemp(join(tmpdir(), `dsh-custom-instructions-e2e-${runId}-`))
-const runtime = join(fixture, 'runtime')
 const home = join(fixture, 'home')
 const workspace = join(fixture, 'workspace')
 
@@ -28,29 +31,24 @@ function runPnpm(args, cwd) {
 
 try {
   await Promise.all([
-    mkdir(runtime, { recursive: true }),
     mkdir(home, { recursive: true }),
     mkdir(workspace, { recursive: true }),
   ])
-  await writeFile(join(runtime, 'package.json'), '{"private":true}\n', 'utf8')
-  await writeFile(join(runtime, 'pnpm-workspace.yaml'), `allowBuilds:
-  '@deepseek-ai/dsh-subprocess-local': true
-  '@google/genai': false
-  koffi: true
-  node-addon-require-builtin: false
-  node-pty: true
-  protobufjs: false
-`, 'utf8')
   await writeFile(join(workspace, 'AGENTS.md'), '# Isolated E2E workspace\n', 'utf8')
+
+  const dshManifest = JSON.parse(await readFile(join(dshSourceRoot, 'package.json'), 'utf8'))
+  if (dshManifest.version !== EXPECTED_DSH_VERSION) {
+    throw new Error(`expected DSH ${EXPECTED_DSH_VERSION}, found ${String(dshManifest.version)}`)
+  }
 
   runPnpm(['build'], repository)
   runPnpm(['pack', '--pack-destination', fixture], repository)
-  runPnpm(['add', '--save-exact', `@deepseek-ai/dsh@${DSH_VERSION}`], runtime)
 
   const tarballs = (await readdir(fixture)).filter((name) => name.endsWith('.tgz'))
   if (tarballs.length !== 1) throw new Error(`expected one plugin tarball, found ${tarballs.length}`)
 
-  const dshEntry = join(runtime, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
+  const dshEntry = join(dshSourceRoot, 'apps', 'cli', 'lib', 'bin.js')
+  await access(dshEntry)
   const isolatedEnv = {
     ...process.env,
     DSH_HOME: home,
@@ -70,8 +68,27 @@ try {
   const server = spawn(process.execPath, [dshEntry, 'web', '--no-open', '--port', PORT], {
     cwd: workspace,
     env: isolatedEnv,
-    stdio: 'inherit',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
   })
+  let readyOutput = ''
+  let capturedAuthenticatedUrl = false
+  const forwardOutput = (stream, destination) => {
+    stream.setEncoding('utf8')
+    stream.on('data', (chunk) => {
+      destination.write(chunk)
+      if (capturedAuthenticatedUrl) return
+      readyOutput = `${readyOutput}${chunk}`.slice(-16_384)
+      const match = /dsh web: (http:\/\/[^\s]+)/u.exec(readyOutput)
+      if (match?.[1] === undefined) return
+      capturedAuthenticatedUrl = true
+      void writeFile(authFile, `${match[1]}\n`, 'utf8').catch((error) => {
+        process.stderr.write(`failed to persist DSH authenticated URL: ${String(error)}\n`)
+      })
+    })
+  }
+  forwardOutput(server.stdout, process.stdout)
+  forwardOutput(server.stderr, process.stderr)
   let stopping = false
   const stop = (signal) => {
     if (stopping) return
