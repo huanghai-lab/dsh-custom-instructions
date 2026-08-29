@@ -11,9 +11,9 @@
 
 DSH Web 的安全指令管理器：编辑全局 `AGENTS.md`，复用模板，预览 Markdown，恢复历史，并在跨窗口或外部修改时阻止静默覆盖。
 
-> v0.4.0 仅适配 DSH `0.1.1-rc.2`。仍在使用旧版 DSH 时，请继续使用本插件 v0.3.0。
+> 稳定版 v0.4.0 适配 DSH `0.1.1-rc.2`。仍在使用更早 DSH 时，请继续使用本插件 v0.3.0。
 
-> 当前 `Unreleased` 已同步官方源码标签 [`dsh-v0.1.2-alpha.1`](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.2-alpha.1)，并通过官方标签源码构建、插件 tarball 隔离安装与真实浏览器 E2E。上游尚未把该预览版发布到 npm，因此普通用户仍应按下方说明使用已发布的 v0.4.0 与 DSH `0.1.1-rc.2`。
+> 预览版 v0.5.0-alpha.1 同步官方源码标签 [`dsh-v0.1.2-alpha.1`](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.2-alpha.1)，并通过官方标签源码构建、插件 tarball 隔离安装与真实浏览器 E2E。上游尚未把该 DSH 预览版发布到 npm；只有使用官方源码构建的测试者才应安装本插件的 `next` 版本。
 
 ## 快速开始
 
@@ -26,13 +26,19 @@ dsh web
 
 重启 Web profile 后，打开 **设置 → 自定义指令**。
 
+使用 DSH `0.1.2-alpha.1` 官方源码构建时，安装预览版：
+
+```bash
+dsh plugin --profile web add @huanghai-lab/dsh-custom-instructions@next
+```
+
 ![中文界面：全局指令与模板](docs/assets/settings-zh.png)
 
 英文界面截图见 [docs/assets/settings-en.png](docs/assets/settings-en.png)。界面跟随 DSH 语言设置，缺少翻译时回退到英文。
 
 ## 功能
 
-| 功能 | v0.4.0 行为 |
+| 功能 | 当前行为 |
 |---|---|
 | 全局指令 | 保存、放弃草稿、撤销上次保存、编辑/Markdown 预览；限制 65 KiB |
 | 浏览器草稿 | 按 DSH profile 存在 `sessionStorage`；保存或主动放弃后清除 |
@@ -115,13 +121,13 @@ dsh web
 
 ### DSH 升级后插件无法加载
 
-已发布的 v0.4.0 只承诺兼容 `0.1.1-rc.2`。当前开发分支已移除 `0.1.2-alpha.1` 删除的客户端 runtime 依赖，适配新版 Markdown 标签和浏览器鉴权接口，并已在官方标签源码构建中完成隔离安装验证。
+稳定版 v0.4.0 只承诺兼容 `0.1.1-rc.2`。预览版 v0.5.0-alpha.1 已移除 `0.1.2-alpha.1` 删除的客户端 runtime 依赖，适配新版 Markdown 标签和浏览器鉴权接口，并在官方标签源码构建中完成隔离安装验证。
 
 ## 兼容矩阵
 
 | 插件版本 | DSH | Node.js | 状态 |
 |---|---|---|---|
-| Unreleased | `0.1.2-alpha.1` | `^22.19.0 || >=24` | 官方标签源码构建、插件 tarball 隔离安装与真实浏览器 E2E 已通过；等待上游 npm 包 |
+| v0.5.0-alpha.1 (`next`) | `0.1.2-alpha.1` | `^22.19.0 || >=24` | 预览版；官方标签源码构建、插件 tarball 隔离安装与真实浏览器 E2E 已通过 |
 | v0.4.0 | `0.1.1-rc.2` | `^22.19.0 || >=24` | 已发布并通过隔离安装 E2E |
 | v0.3.0 | `0.1.0-rc.6` | `^22.19.0 || >=24` | 旧环境保留 |
 

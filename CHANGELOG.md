@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.5.0-alpha.1] - 2026-08-29
+
 ### Changed
 
 - 适配 DSH `0.1.2-alpha.1`：客户端上下文改用 Cordis，移除已删除的 `dsh-client-runtime` 注入，并同步新的浏览器平台模块表。
@@ -36,5 +38,6 @@
 - 修改进入进程内串行队列，并通过同目录临时文件、回读校验和替换完成。
 - 模板名不再直接作为物理路径，阻断路径穿越。
 
-[Unreleased]: https://github.com/huanghai-lab/dsh-custom-instructions/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/huanghai-lab/dsh-custom-instructions/compare/v0.5.0-alpha.1...HEAD
+[0.5.0-alpha.1]: https://github.com/huanghai-lab/dsh-custom-instructions/compare/v0.4.0...v0.5.0-alpha.1
 [0.4.0]: https://github.com/huanghai-lab/dsh-custom-instructions/compare/v0.3.0...v0.4.0
