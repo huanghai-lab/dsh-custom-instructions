@@ -11,7 +11,9 @@
 
 A safe instruction manager for DSH Web: edit the global `AGENTS.md`, reuse templates, preview Markdown, restore history, and block silent overwrites when another window or program changes the data.
 
-> v0.4.0 supports DSH `0.1.1-rc.2` only. Keep using plugin v0.3.0 on older DSH installations.
+> Stable v0.4.0 supports DSH `0.1.1-rc.2`. Keep using plugin v0.3.0 on older DSH installations.
+
+> Preview v0.5.0-alpha.1 tracks the official [`dsh-v0.1.2-alpha.1`](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.2-alpha.1), and has passed a tagged-source build, isolated plugin-tarball installation, and real browser E2E. Upstream has not published this DSH preview to npm; only testers running the official source build should install this plugin's `next` version.
 
 ## Quick start
 
@@ -24,13 +26,19 @@ dsh web
 
 Restart the Web profile, then open **Settings → Custom instructions**.
 
+When running the official DSH `0.1.2-alpha.1` source build, install the preview:
+
+```bash
+dsh plugin --profile web add @huanghai-lab/dsh-custom-instructions@next
+```
+
 ![English UI](docs/assets/settings-en.png)
 
 The UI follows the DSH locale and falls back to English. A Chinese screenshot is available at [docs/assets/settings-zh.png](docs/assets/settings-zh.png).
 
 ## Features
 
-| Feature | v0.4.0 behavior |
+| Feature | Current behavior |
 |---|---|
 | Global instructions | Save, discard draft, undo last save, edit/Markdown preview; 65 KiB limit |
 | Browser draft | Stored in `sessionStorage` per DSH profile; cleared after save or explicit discard |
@@ -113,13 +121,14 @@ Check the displayed storage path, `$DSH_HOME` permissions, and DSH logs. The hos
 
 ### The plugin stopped loading after a DSH upgrade
 
-v0.4.0 guarantees compatibility only with `0.1.1-rc.2`. Check the matrix below instead of rebuilding against an unverified interface.
+Stable v0.4.0 guarantees compatibility only with `0.1.1-rc.2`. Preview v0.5.0-alpha.1 removes the client runtime deleted by `0.1.2-alpha.1`, supports the new Markdown labels and browser-authentication APIs, and has completed isolated installation against the official tagged source build.
 
 ## Compatibility
 
 | Plugin | DSH | Node.js | Status |
 |---|---|---|---|
-| v0.4.x | `0.1.1-rc.2` | `^22.19.0 || >=24` | Supported |
+| v0.5.0-alpha.1 (`next`) | `0.1.2-alpha.1` | `^22.19.0 || >=24` | Preview; tagged-source build, isolated plugin-tarball installation, and real browser E2E passed |
+| v0.4.0 | `0.1.1-rc.2` | `^22.19.0 || >=24` | Released and isolated-install E2E verified |
 | v0.3.0 | `0.1.0-rc.6` | `^22.19.0 || >=24` | Legacy environments |
 
 ## Development and verification
@@ -129,12 +138,16 @@ pnpm install --frozen-lockfile
 pnpm typecheck
 pnpm test
 pnpm build
-pnpm e2e
+pnpm compat:dsh /path/to/deepseek-harness
+pnpm typecheck:dsh-source /path/to/deepseek-harness
+pnpm e2e -- /path/to/deepseek-harness
 ```
 
-`pnpm e2e` installs the pinned official DSH and the current npm tarball under the OS temporary directory, creates an isolated `DSH_HOME` and workspace, then exercises save, preview, templates, history, import/export, and both locales in the real GUI. It never touches the user's real `AGENTS.md`.
+First run the locked install and build in the official `dsh-v0.1.2-alpha.1` source checkout. `pnpm e2e -- <source-directory>` uses that build and the current plugin tarball, creates an isolated `DSH_HOME` and workspace under the OS temporary directory, then exercises one-time login, save, preview, templates, history, import/export, and both locales in the real GUI. It never touches the user's real `AGENTS.md`.
 
-CI runs locked install, typecheck, tests, build, and committed-`lib` freshness on Node 24 for Ubuntu and Windows. Ubuntu also runs the isolated DSH E2E.
+`pnpm compat:dsh` checks the DSH source directory for the client Context, Markdown, settings, workspace, Persona, and Web route interfaces used by this plugin. CI runs it against the official `dsh-v0.1.2-alpha.1` tag.
+
+CI runs locked install, typecheck, tests, build, and committed-`lib` freshness on Node 24 for Ubuntu and Windows. Ubuntu also builds the official alpha tag, typechecks against its declarations, and runs isolated browser E2E. Once upstream npm packages are installable, the npm installation path must still be rechecked against the published artifacts.
 
 ## Community
 

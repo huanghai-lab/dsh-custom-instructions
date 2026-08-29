@@ -3,7 +3,7 @@
  * (设置 → 自定义指令) into `settings.section`. The page edits the global
  * instruction file (~/.dsh/AGENTS.md) served by the host route family.
  */
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client';
+import type { Context as ClientContext } from '@deepseek-ai/cordis';
 /** Required services. */
 export declare const inject: string[];
 /**

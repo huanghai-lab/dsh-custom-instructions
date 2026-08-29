@@ -4,8 +4,35 @@ import { join } from 'node:path'
 
 const API = '/api/dsh-custom-instructions'
 
+async function waitForAuthenticatedUrl(): Promise<string> {
+  const authFile = process.env.DSH_E2E_AUTH_FILE
+  if (authFile === undefined) throw new Error('DSH_E2E_AUTH_FILE is missing')
+  const deadline = Date.now() + 15_000
+  while (Date.now() < deadline) {
+    try {
+      const url = (await readFile(authFile, 'utf8')).trim()
+      if (url.length > 0) return url
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  throw new Error('DSH did not publish its authenticated browser URL')
+}
+
 test('runs the complete instruction workflow in an isolated DSH profile', async ({ page }) => {
   test.setTimeout(120_000)
+  const denied = await page.request.get(API)
+  expect(denied.status()).toBe(401)
+  expect(await denied.json()).toMatchObject({ code: 'AUTH_REQUIRED' })
+
+  await page.goto(await waitForAuthenticatedUrl())
+  const continueButton = page.getByRole('button', { name: /继续|Continue/ })
+  if (await continueButton.isVisible()) await continueButton.click()
+  const laterButton = page.getByRole('button', { name: /稍后配置|Configure later/ })
+  await laterButton.waitFor({ state: 'visible', timeout: 10_000 })
+  await laterButton.click()
+
   const initial = await (await page.request.get(API)).json() as {
     ok: boolean
     path: string
@@ -16,9 +43,6 @@ test('runs the complete instruction workflow in an isolated DSH profile', async 
   expect(initial.path).toContain('dsh-custom-instructions-e2e-')
   expect(initial.text).toBe('')
 
-  await page.goto('/')
-  await page.getByRole('button', { name: /继续|Continue/ }).click()
-  await page.getByRole('button', { name: '稍后配置' }).click()
   await page.getByRole('button', { name: /设置|Settings/ }).click()
   await page.getByRole('button', { name: '自定义指令', exact: true }).click()
 

@@ -13,7 +13,19 @@ export const MAX_INSTRUCTIONS_BYTES = store.MAX_CONTENT_BYTES
 // JSON control-character escapes can expand one content byte to six bytes.
 const SMALL_BODY_BYTES = store.MAX_CONTENT_BYTES * 6 + 8 * 1024
 
-export const inject = ['webServer']
+export const inject = ['webServer', 'connection']
+
+interface ProtectedConnection {
+  requestRejection(request: Pick<IncomingMessage, 'headers'>): 401 | 403 | undefined
+}
+
+function connectionOf(ctx: Context): ProtectedConnection {
+  const connection = Reflect.get(ctx, 'connection') as Partial<ProtectedConnection> | undefined
+  if (typeof connection?.requestRejection !== 'function') {
+    throw new Error('dsh-custom-instructions requires an authenticated DSH connection service')
+  }
+  return connection as ProtectedConnection
+}
 
 class RequestError extends Error {
   constructor(
@@ -161,7 +173,18 @@ function handleError(ctx: Context, res: ServerResponse, error: unknown): void {
 }
 
 export function registerCustomInstructionsRoutes(ctx: Context): Array<() => void> {
+  const connection = connectionOf(ctx)
   const handler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    const rejection = connection.requestRejection(req)
+    if (rejection !== undefined) {
+      fail(
+        res,
+        rejection,
+        rejection === 401 ? 'AUTH_REQUIRED' : 'FORBIDDEN',
+        rejection === 401 ? 'browser authentication is required' : 'request origin is not allowed',
+      )
+      return
+    }
     try {
       const globalPath = await instructionsPath(ctx)
       const segments = routePath(req.url)

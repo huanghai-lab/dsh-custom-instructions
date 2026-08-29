@@ -4,9 +4,11 @@
  * instruction file (~/.dsh/AGENTS.md) served by the host route family.
  */
 
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
+// Type-only: pulls the renderer-owned ctx.slots service merge in DSH 0.1.2+.
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 // Type-only: pulls the settings-surface SlotMap merge (the 'settings.section'
 // entry).
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'

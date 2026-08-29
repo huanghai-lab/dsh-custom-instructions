@@ -14,6 +14,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  dsh-compat:
+    name: DSH 0.1.2-alpha.1 source compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: dsh-v0.1.2-alpha.1
+          path: dsh-upstream
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - run: node scripts/check-dsh-compat.mjs dsh-upstream
+
   check:
     name: check (${{ matrix.os }}, Node 24)
     strategy:
@@ -42,11 +61,17 @@ jobs:
         run: git diff --exit-code -- lib
 
   e2e:
-    name: isolated DSH 0.1.1-rc.2 E2E
+    name: isolated DSH 0.1.2-alpha.1 source E2E
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: dsh-v0.1.2-alpha.1
+          path: dsh-upstream
 
       - uses: pnpm/action-setup@v4
         with:
@@ -58,8 +83,11 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --dir dsh-upstream install --frozen-lockfile
+      - run: pnpm --dir dsh-upstream build
+      - run: pnpm typecheck:dsh-source dsh-upstream
       - run: pnpm exec playwright install chromium --with-deps
-      - run: pnpm e2e
+      - run: pnpm e2e -- dsh-upstream
 
       - name: Upload E2E diagnostics
         if: failure()

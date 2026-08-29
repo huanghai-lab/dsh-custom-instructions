@@ -57,12 +57,17 @@ jobs:
         shell: bash
         run: |
           version=$(node -p "require('./package.json').version")
+          publish_tag=latest
+          case "$version" in
+            *-*) publish_tag=next ;;
+          esac
           if ! npm view "@huanghai-lab/dsh-custom-instructions@$version" version >/dev/null 2>&1; then
-            npm publish ./dist/*.tgz --access public --provenance
+            npm publish ./dist/*.tgz --access public --provenance --tag "$publish_tag"
           fi
           for attempt in 1 2 3 4 5 6; do
-            published=$(npm view @huanghai-lab/dsh-custom-instructions version 2>/dev/null || true)
-            [ "$published" = "$version" ] && exit 0
+            published=$(npm view "@huanghai-lab/dsh-custom-instructions@$version" version 2>/dev/null || true)
+            tagged=$(npm view "@huanghai-lab/dsh-custom-instructions" "dist-tags.$publish_tag" 2>/dev/null || true)
+            [ "$published" = "$version" ] && [ "$tagged" = "$version" ] && exit 0
             sleep 10
           done
           exit 1

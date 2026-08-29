@@ -22,6 +22,7 @@ function fakeCtx(settingsDoc: string, services: Record<string, unknown> = {}): {
   const warnings: string[] = []
   const ctx = {
     logger: { warn: (message: string) => warnings.push(message) },
+    connection: services.connection ?? { requestRejection: () => undefined },
     get: (name: string) => {
       if (name === 'settings') return { prepareDocument: async () => settingsDoc }
       return services[name]
@@ -96,6 +97,24 @@ async function exists(path: string): Promise<boolean> {
 }
 
 describe('global instructions and concurrency', () => {
+  it('rejects unauthenticated and untrusted requests before reading private instructions', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'custinstr-'))
+    try {
+      await writeFile(join(directory, 'AGENTS.md'), 'private instructions\n', 'utf8')
+      for (const [rejection, code] of [[401, 'AUTH_REQUIRED'], [403, 'FORBIDDEN']] as const) {
+        const { handler } = fakeCtx(join(directory, 'settings.yaml'), {
+          connection: { requestRejection: () => rejection },
+        })
+        const response = await handler('GET')
+        expect(response.status).toBe(rejection)
+        expect(envelope(response).code).toBe(code)
+        expect(response.body).not.toContain('private instructions')
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
   it('rejects unknown routes and extra path segments', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'custinstr-'))
     try {
