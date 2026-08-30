@@ -11,9 +11,11 @@
 
 DSH Web 的安全指令管理器：编辑全局 `AGENTS.md`，复用模板，预览 Markdown，恢复历史，并在跨窗口或外部修改时阻止静默覆盖。
 
+它不是单一的规则文本框，而是面向可迁移、可恢复和并发安全维护的全局指令工作台。
+
 > 稳定版 v0.4.0 适配 DSH `0.1.1-rc.2`。仍在使用更早 DSH 时，请继续使用本插件 v0.3.0。
 
-> 预览版 v0.5.0-alpha.1 同步官方源码标签 [`dsh-v0.1.2-alpha.1`](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.2-alpha.1)，并通过官方标签源码构建、插件 tarball 隔离安装与真实浏览器 E2E。上游尚未把该 DSH 预览版发布到 npm；只有使用官方源码构建的测试者才应安装本插件的 `next` 版本。
+> 预览版 v0.5.0-alpha.2 同步官方源码标签 [`dsh-v0.1.2-alpha.1`](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.2-alpha.1)，并通过官方标签源码构建、插件 tarball 隔离安装与真实浏览器 E2E。上游尚未把该 DSH 预览版发布到 npm；只有使用官方源码构建的测试者才应安装本插件的 `next` 版本。
 
 ## 快速开始
 
@@ -46,14 +48,14 @@ dsh plugin --profile web add @huanghai-lab/dsh-custom-instructions@next
 | 模板 | 支持中英文名称、独立编辑/预览/保存、激活和确认删除；最多 50 个 |
 | 历史 | 覆盖前自动快照，可展开预览和确认恢复；最多保留最新 100 条 |
 | 导入导出 | 迁移当前内容、模板、历史和激活状态；严格校验、合并、失败回滚 |
-| 环境概览 | 只读展示项目级 `AGENTS.md` 与 Persona，并标明 DSH 数据来源 |
+| 项目指令概览 | 只读展示已注册工作区的项目级 `AGENTS.md` 状态 |
 | 无障碍 | 键盘保存、焦点恢复、ARIA、原生确认框/文件选择器和窄屏布局 |
 
 Markdown 预览直接使用 DSH 官方 `MarkdownText`，没有引入另一套 Markdown 解析器。
 
 ## 数据安全
 
-- 插件只写当前 `$DSH_HOME/AGENTS.md` 和同目录下的 `instructions/` 数据，不会修改项目级 `AGENTS.md` 或 Persona。
+- 插件只写当前 `$DSH_HOME/AGENTS.md` 和同目录下的 `instructions/` 数据，不会修改项目级 `AGENTS.md`。
 - 写请求必须携带根据实际磁盘内容生成的 SHA-256 `revision`。多窗口或插件外修改会返回 `409`，不会静默覆盖。
 - 同一 DSH 进程内的修改串行执行；文件通过同目录临时文件写入、回读校验后替换。
 - 全局内容每次覆盖前写入 `AGENTS.md.bak` 和历史记录；只有备份文件确实存在时，界面才显示可撤销。
@@ -121,13 +123,13 @@ dsh web
 
 ### DSH 升级后插件无法加载
 
-稳定版 v0.4.0 只承诺兼容 `0.1.1-rc.2`。预览版 v0.5.0-alpha.1 已移除 `0.1.2-alpha.1` 删除的客户端 runtime 依赖，适配新版 Markdown 标签和浏览器鉴权接口，并在官方标签源码构建中完成隔离安装验证。
+稳定版 v0.4.0 只承诺兼容 `0.1.1-rc.2`。预览版 v0.5.0-alpha.2 已移除 `0.1.2-alpha.1` 删除的客户端 runtime 依赖，适配新版 Markdown 标签和浏览器鉴权接口，并在官方标签源码构建中完成隔离安装验证。
 
 ## 兼容矩阵
 
 | 插件版本 | DSH | Node.js | 状态 |
 |---|---|---|---|
-| v0.5.0-alpha.1 (`next`) | `0.1.2-alpha.1` | `^22.19.0 || >=24` | 预览版；官方标签源码构建、插件 tarball 隔离安装与真实浏览器 E2E 已通过 |
+| v0.5.0-alpha.2 (`next`) | `0.1.2-alpha.1` | `^22.19.0 || >=24` | 预览版；官方标签源码构建、插件 tarball 隔离安装与真实浏览器 E2E 已通过 |
 | v0.4.0 | `0.1.1-rc.2` | `^22.19.0 || >=24` | 已发布并通过隔离安装 E2E |
 | v0.3.0 | `0.1.0-rc.6` | `^22.19.0 || >=24` | 旧环境保留 |
 
@@ -145,7 +147,7 @@ pnpm e2e -- /path/to/deepseek-harness
 
 先在官方 `dsh-v0.1.2-alpha.1` 源码目录完成锁定安装与构建。`pnpm e2e -- <源码目录>` 会使用该构建和当前插件 tarball，在系统临时目录创建隔离的 `DSH_HOME` 与 workspace，再真实验证一次性登录、保存、预览、模板、历史、导入导出和中英文界面。它不会接触用户真实的 `AGENTS.md`。
 
-`pnpm compat:dsh` 校验 DSH 源码目录中的客户端 Context、Markdown、设置页、工作区、Persona 和 Web 路由接口。CI 会直接检出官方 `dsh-v0.1.2-alpha.1` 标签执行这项检查。
+`pnpm compat:dsh` 校验 DSH 源码目录中的客户端 Context、Markdown、设置页、工作区和 Web 路由接口。CI 会直接检出官方 `dsh-v0.1.2-alpha.1` 标签执行这项检查。
 
 CI 在 Ubuntu 与 Windows 的 Node 24 上执行锁定安装、类型检查、测试和构建，并检查提交的 `lib/` 没有落后源码；Ubuntu 还会构建官方 alpha 标签、执行源码类型检查和隔离浏览器 E2E。上游 npm 包可安装后，仍需补跑一次 npm 安装链路复核发布物。
 

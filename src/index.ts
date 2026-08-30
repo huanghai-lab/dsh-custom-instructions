@@ -146,23 +146,6 @@ async function projectView(ctx: Context): Promise<ProjectEntry[]> {
   }))
 }
 
-async function personaView(ctx: Context): Promise<{
-  view: { preset: string; persona: string } | null
-  available: boolean
-  reason?: string
-}> {
-  const presets = ctx.get('agentPresets')
-  if (presets === undefined) return { view: null, available: false, reason: 'agentPresets service is unavailable' }
-  try {
-    const preset = await presets.resolve()
-    const composition = await presets.read(preset.id)
-    const match = /- id:\s*persona[\s\S]*?text:\s*\|-?\s*\n([\s\S]*?)(?=\n- id:|\n---|\n\s{2,}\S+:|$)/.exec(composition)
-    return { view: { preset: preset.id, persona: match?.[1].trim() ?? '' }, available: true }
-  } catch (error) {
-    return { view: null, available: false, reason: String((error as Error).message ?? error) }
-  }
-}
-
 function handleError(ctx: Context, res: ServerResponse, error: unknown): void {
   if (error instanceof store.StoreError || error instanceof RequestError) {
     fail(res, error.status, error.code, error.message)
@@ -195,8 +178,12 @@ export function registerCustomInstructionsRoutes(ctx: Context): Array<() => void
       const sub = segments[0] ?? ''
 
       if (sub === '' && segments.length === 1 && req.method === 'GET') {
-        const { value: [text, active, backup], revision } = await store.readConsistent(globalPath, () => Promise.all([
-          store.readGlobal(globalPath), store.readActive(globalPath), store.hasBackup(globalPath),
+        const { value: [text, active, backup, templates, history], revision } = await store.readConsistent(globalPath, () => Promise.all([
+          store.readGlobal(globalPath),
+          store.readActive(globalPath),
+          store.hasBackup(globalPath),
+          store.listTemplates(globalPath),
+          store.listHistory(globalPath),
         ]))
         json(res, {
           ok: true,
@@ -204,6 +191,8 @@ export function registerCustomInstructionsRoutes(ctx: Context): Array<() => void
           text,
           active,
           hasBackup: backup,
+          templates,
+          history,
           revision,
           maxBytes: store.MAX_CONTENT_BYTES,
           maxTemplates: store.MAX_TEMPLATES,
@@ -317,11 +306,6 @@ export function registerCustomInstructionsRoutes(ctx: Context): Array<() => void
 
       if (sub === 'project' && segments.length === 1 && req.method === 'GET') {
         json(res, { ok: true, source: 'workspaceRegistry', projects: await projectView(ctx) })
-        return
-      }
-
-      if (sub === 'preset' && segments.length === 1 && req.method === 'GET') {
-        json(res, { ok: true, source: 'agentPresets', ...(await personaView(ctx)) })
         return
       }
 
