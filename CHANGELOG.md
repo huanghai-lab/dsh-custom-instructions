@@ -4,6 +4,24 @@
 
 ## [Unreleased]
 
+## [0.5.0-alpha.2] - 2026-08-31
+
+### Fixed
+
+- 创建新模板前会保护尚未保存的模板草稿，取消确认后不会丢失编辑内容。
+- 删除其他模板后会同步当前模板的磁盘修订号，避免后续保存出现错误的 `409` 冲突。
+
+### Changed
+
+- 首次加载改为一次一致性快照，同时返回全局内容、模板和历史；模板修订计算只扫描一次文件目录。
+- 只读概览聚焦项目级 `AGENTS.md`，移除与插件核心职责重复的 Persona 解析和兼容面。
+- 删除未使用的移动端/CSS Modules 构建分支、`lightningcss` 直接依赖和过期内部发布文档。
+- 新增仓库级 `screenshots.json`，明确 Awesome DSH Plugin 商店截图的顺序与来源。
+
+### Validation
+
+- 35 项测试、Windows/Ubuntu Node 24 构建、提交产物新鲜度、DSH `0.1.2-alpha.1` 源码兼容与隔离浏览器 E2E 均通过。
+
 ## [0.5.0-alpha.1] - 2026-08-29
 
 ### Changed
@@ -38,6 +56,7 @@
 - 修改进入进程内串行队列，并通过同目录临时文件、回读校验和替换完成。
 - 模板名不再直接作为物理路径，阻断路径穿越。
 
-[Unreleased]: https://github.com/huanghai-lab/dsh-custom-instructions/compare/v0.5.0-alpha.1...HEAD
+[Unreleased]: https://github.com/huanghai-lab/dsh-custom-instructions/compare/v0.5.0-alpha.2...HEAD
+[0.5.0-alpha.2]: https://github.com/huanghai-lab/dsh-custom-instructions/compare/v0.5.0-alpha.1...v0.5.0-alpha.2
 [0.5.0-alpha.1]: https://github.com/huanghai-lab/dsh-custom-instructions/compare/v0.4.0...v0.5.0-alpha.1
 [0.4.0]: https://github.com/huanghai-lab/dsh-custom-instructions/compare/v0.3.0...v0.4.0

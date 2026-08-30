@@ -11,9 +11,11 @@
 
 A safe instruction manager for DSH Web: edit the global `AGENTS.md`, reuse templates, preview Markdown, restore history, and block silent overwrites when another window or program changes the data.
 
+It is a portable, recoverable, conflict-safe workspace for global instructions rather than a bare rules textarea.
+
 > Stable v0.4.0 supports DSH `0.1.1-rc.2`. Keep using plugin v0.3.0 on older DSH installations.
 
-> Preview v0.5.0-alpha.1 tracks the official [`dsh-v0.1.2-alpha.1`](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.2-alpha.1), and has passed a tagged-source build, isolated plugin-tarball installation, and real browser E2E. Upstream has not published this DSH preview to npm; only testers running the official source build should install this plugin's `next` version.
+> Preview v0.5.0-alpha.2 tracks the official [`dsh-v0.1.2-alpha.1`](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.2-alpha.1), and has passed a tagged-source build, isolated plugin-tarball installation, and real browser E2E. Upstream has not published this DSH preview to npm; only testers running the official source build should install this plugin's `next` version.
 
 ## Quick start
 
@@ -121,13 +123,13 @@ Check the displayed storage path, `$DSH_HOME` permissions, and DSH logs. The hos
 
 ### The plugin stopped loading after a DSH upgrade
 
-Stable v0.4.0 guarantees compatibility only with `0.1.1-rc.2`. Preview v0.5.0-alpha.1 removes the client runtime deleted by `0.1.2-alpha.1`, supports the new Markdown labels and browser-authentication APIs, and has completed isolated installation against the official tagged source build.
+Stable v0.4.0 guarantees compatibility only with `0.1.1-rc.2`. Preview v0.5.0-alpha.2 removes the client runtime deleted by `0.1.2-alpha.1`, supports the new Markdown labels and browser-authentication APIs, and has completed isolated installation against the official tagged source build.
 
 ## Compatibility
 
 | Plugin | DSH | Node.js | Status |
 |---|---|---|---|
-| v0.5.0-alpha.1 (`next`) | `0.1.2-alpha.1` | `^22.19.0 || >=24` | Preview; tagged-source build, isolated plugin-tarball installation, and real browser E2E passed |
+| v0.5.0-alpha.2 (`next`) | `0.1.2-alpha.1` | `^22.19.0 || >=24` | Preview; tagged-source build, isolated plugin-tarball installation, and real browser E2E passed |
 | v0.4.0 | `0.1.1-rc.2` | `^22.19.0 || >=24` | Released and isolated-install E2E verified |
 | v0.3.0 | `0.1.0-rc.6` | `^22.19.0 || >=24` | Legacy environments |
 
