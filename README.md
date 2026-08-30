@@ -46,14 +46,14 @@ dsh plugin --profile web add @huanghai-lab/dsh-custom-instructions@next
 | 模板 | 支持中英文名称、独立编辑/预览/保存、激活和确认删除；最多 50 个 |
 | 历史 | 覆盖前自动快照，可展开预览和确认恢复；最多保留最新 100 条 |
 | 导入导出 | 迁移当前内容、模板、历史和激活状态；严格校验、合并、失败回滚 |
-| 环境概览 | 只读展示项目级 `AGENTS.md` 与 Persona，并标明 DSH 数据来源 |
+| 项目指令概览 | 只读展示已注册工作区的项目级 `AGENTS.md` 状态 |
 | 无障碍 | 键盘保存、焦点恢复、ARIA、原生确认框/文件选择器和窄屏布局 |
 
 Markdown 预览直接使用 DSH 官方 `MarkdownText`，没有引入另一套 Markdown 解析器。
 
 ## 数据安全
 
-- 插件只写当前 `$DSH_HOME/AGENTS.md` 和同目录下的 `instructions/` 数据，不会修改项目级 `AGENTS.md` 或 Persona。
+- 插件只写当前 `$DSH_HOME/AGENTS.md` 和同目录下的 `instructions/` 数据，不会修改项目级 `AGENTS.md`。
 - 写请求必须携带根据实际磁盘内容生成的 SHA-256 `revision`。多窗口或插件外修改会返回 `409`，不会静默覆盖。
 - 同一 DSH 进程内的修改串行执行；文件通过同目录临时文件写入、回读校验后替换。
 - 全局内容每次覆盖前写入 `AGENTS.md.bak` 和历史记录；只有备份文件确实存在时，界面才显示可撤销。
@@ -145,7 +145,7 @@ pnpm e2e -- /path/to/deepseek-harness
 
 先在官方 `dsh-v0.1.2-alpha.1` 源码目录完成锁定安装与构建。`pnpm e2e -- <源码目录>` 会使用该构建和当前插件 tarball，在系统临时目录创建隔离的 `DSH_HOME` 与 workspace，再真实验证一次性登录、保存、预览、模板、历史、导入导出和中英文界面。它不会接触用户真实的 `AGENTS.md`。
 
-`pnpm compat:dsh` 校验 DSH 源码目录中的客户端 Context、Markdown、设置页、工作区、Persona 和 Web 路由接口。CI 会直接检出官方 `dsh-v0.1.2-alpha.1` 标签执行这项检查。
+`pnpm compat:dsh` 校验 DSH 源码目录中的客户端 Context、Markdown、设置页、工作区和 Web 路由接口。CI 会直接检出官方 `dsh-v0.1.2-alpha.1` 标签执行这项检查。
 
 CI 在 Ubuntu 与 Windows 的 Node 24 上执行锁定安装、类型检查、测试和构建，并检查提交的 `lib/` 没有落后源码；Ubuntu 还会构建官方 alpha 标签、执行源码类型检查和隔离浏览器 E2E。上游 npm 包可安装后，仍需补跑一次 npm 安装链路复核发布物。
 

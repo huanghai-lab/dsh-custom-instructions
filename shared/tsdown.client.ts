@@ -5,29 +5,14 @@
  * closure-factory artifact: the bundle calls window.__ModuleLoader__.load
  * ({id, factory}) and resolves externals through the injected require
  * (loader module table — cordis DI entities, no globals, no import map).
- * CSS Modules are compiled by lightningcss inside the bundle: importing
- * `x.module.css` yields the hashed class map, and the css text auto-injects
- * a <style data-plugin="<id>"> tag at factory execution (the loader removes
- * plugin-owned tags on unload). The virtual loader registers each real
- * stylesheet as a watch dependency. The platform module list mirrors the
- * shell's seed table in `./web-platform.ts`.
+ * The platform module list mirrors the shell's seed table in
+ * `./web-platform.ts`.
  */
-import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { basename, dirname, isAbsolute, relative, resolve as resolvePath, sep } from 'node:path'
+import { dirname, relative, resolve as resolvePath, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { UserConfig } from 'tsdown'
-import { transform } from 'lightningcss'
 import { PLATFORM_MODULES } from './web-platform.ts'
-
-/**
- * Virtual-id wrapper keeping module CSS away from tsdown's own css pipeline
- * (which requires @tsdown/css). The suffix matters: tsdown's guard matches ids
- * ending in `.css`, so the virtual id must not.
- */
-const CSS_VIRTUAL_PREFIX = '\0dsh-css:'
-const CSS_VIRTUAL_SUFFIX = '.mjs'
 
 /**
  * Wire/type layers a client bundle may inline: browser-safe contract surfaces
@@ -50,13 +35,6 @@ const SKIP_WORKSPACE_BUILD: UserConfig = { entry: '' }
 export const CLIENT_EXTERNALS: readonly string[] = [...PLATFORM_MODULES]
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('..', import.meta.url))
-
-/** Rebase a physical path onto a repository-relative id when it lives under the repo. */
-function repositoryRelativePath(physical: string): string {
-  if (!isAbsolute(physical)) return physical
-  const repositoryPath = relative(REPOSITORY_ROOT, physical).split(sep).join('/')
-  return repositoryPath.startsWith('../') ? physical : repositoryPath
-}
 
 /** Rebase a physical lib-relative source onto a browser URL that mirrors the repository directories. */
 function browserSourcePath(source: string, sourcemapPath: string): string {
@@ -99,57 +77,6 @@ export function clientBundle(
     if (face === 'host') return options.hostPhase === true ? node : [SKIP_WORKSPACE_BUILD]
     if (face === 'client') return options.hostPhase === true ? (client ? [client] : []) : (client ? [...node, client] : node)
     return client ? [...node, client] : node
-  }
-}
-
-/**
- * The standalone mobile page bundle (served by the plugin's own route). It
- * boots WITHOUT the main UI's module loader, so everything — React, zod, the
- * harness wire contracts — is inlined into one self-contained module script.
- * The page talks to the host through plain fetch/WebSocket over /api.
- * @param id - plugin id (package name), used in tsdown diagnostics.
- * @param entry - the mobile page entry (e.g. `src/mobile/index.tsx`).
- * @returns a fully self-contained browser bundle config.
- */
-export function mobileBundle(id: string, entry: string): UserConfig {
-  const mobileRequire = createRequire(import.meta.url)
-  return {
-    name: `${id}/mobile`,
-    entry: { mobile: entry },
-    outDir: 'lib',
-    format: 'esm',
-    platform: 'browser',
-    target: 'es2022',
-    dts: false,
-    sourcemap: true,
-    clean: false,
-    // Fully self-contained: no externals, no module table.
-    deps: {
-      alwaysBundle: [/.*/],
-    },
-    define: {
-      'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'production'),
-      'import.meta.env.MODE': JSON.stringify(process.env.NODE_ENV ?? 'production'),
-      'import.meta.env': JSON.stringify({ MODE: process.env.NODE_ENV ?? 'production' }),
-    },
-    plugins: [{
-      // Wire contracts resolve through node_modules (the exports map lands on
-      // the real runtime values) instead of the tsconfig paths' declaration
-      // files, which would miss every value export.
-      name: 'dsh-mobile-value-resolution',
-      resolveId(source: string) {
-        const match = /^@deepseek-ai\/dsh-host-apiproxy\/api(?:\/.*)?$/.exec(source)
-        if (match === null) return null
-        try {
-          return mobileRequire.resolve(source)
-        } catch {
-          return null
-        }
-      },
-    }],
-    outputOptions: {
-      entryFileNames: 'mobile.js',
-    },
   }
 }
 
@@ -261,54 +188,6 @@ function clientConfig(id: string, entry: string): UserConfig {
           + 'cross-plugin value imports are forbidden; collaborate through cordis services (type-only imports are erased and never reach this gate)',
         )
       },
-    }, {
-      name: 'dsh-css-modules-inline',
-      resolveId(source: string, importer: string | undefined) {
-        if (!source.endsWith('.module.css')) return null
-        const abs = importer !== undefined ? sourceAssetPath(source, importer) : source
-        // Repo-relative virtual id: the emitted `//#region` comments would
-        // otherwise embed each builder's machine path, churning every
-        // committed lib/client.js when another machine rebuilds.
-        return CSS_VIRTUAL_PREFIX + repositoryRelativePath(abs) + CSS_VIRTUAL_SUFFIX
-      },
-      async load(virtualId: string) {
-        if (!virtualId.startsWith(CSS_VIRTUAL_PREFIX)) return null
-        const fileId = virtualId.slice(CSS_VIRTUAL_PREFIX.length, -CSS_VIRTUAL_SUFFIX.length)
-        // Rebase the repo-relative id back onto the physical stylesheet; the
-        // virtual id otherwise hides it from Rolldown's watch graph.
-        const physical = isAbsolute(fileId) ? fileId : resolvePath(REPOSITORY_ROOT, fileId)
-        this.addWatchFile(physical)
-        const source = await readFile(physical)
-        const { code, exports: cssExports } = transform({
-          // Repo-relative filename: lightningcss's [hash] placeholder mixes
-          // the filename in, so an absolute path would yield machine-dependent
-          // class names on top of the region-comment noise.
-          filename: fileId,
-          code: source,
-          cssModules: { pattern: '[hash]_[local]' },
-          minify: true,
-        })
-        const classMap: Record<string, string> = {}
-        // Sort deterministically: lightningcss's cssExports iteration order is
-        // process-dependent (hash-map seeds), which would otherwise churn the
-        // emitted lib/client.js on every rebuild.
-        for (const [local, exp] of Object.entries(cssExports ?? {}).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
-          classMap[local] = exp.name
-        }
-        // One <style data-plugin> per module file; idempotent under re-evaluation.
-        return [
-          `const css = ${JSON.stringify(code.toString())};`,
-          `const tagId = ${JSON.stringify(`${id}/${basename(fileId)}`)};`,
-          'if (typeof document !== \'undefined\' && document.querySelector(\'style[data-plugin-css=\' + JSON.stringify(tagId) + \']\') === null) {',
-          '  const tag = document.createElement(\'style\');',
-          `  tag.dataset.plugin = ${JSON.stringify(id)};`,
-          '  tag.dataset.pluginCss = tagId;',
-          '  tag.textContent = css;',
-          '  document.head.appendChild(tag);',
-          '}',
-          `export default ${JSON.stringify(classMap)};`,
-        ].join('\n')
-      },
     }],
     outputOptions: {
       entryFileNames: 'client.js',
@@ -322,14 +201,4 @@ function clientConfig(id: string, entry: string): UserConfig {
       intro: 'var module = { exports: {} }; var exports = module.exports;',
     },
   }
-}
-
-/** Resolve an emitted JS asset import against its source-tree counterpart. */
-function sourceAssetPath(source: string, importer: string): string {
-  const emitted = resolvePath(dirname(importer), source)
-  if (existsSync(emitted)) return emitted
-  const marker = `${sep}lib${sep}types${sep}`
-  const boundary = emitted.indexOf(marker)
-  if (boundary < 0) return emitted
-  return resolvePath(emitted.slice(0, boundary), 'src', emitted.slice(boundary + marker.length))
 }

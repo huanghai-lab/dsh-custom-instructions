@@ -63,8 +63,4 @@ const workspaces = await text('packages/workspace/workspace/src/types.ts')
 requireMatch(workspaces, /readonly path:\s*string/, 'workspace path projection changed')
 requireMatch(workspaces, /readonly title:\s*string/, 'workspace title projection changed')
 
-const presets = await text('packages/preset/agent-presets/src/index.ts')
-requireMatch(presets, /async resolve\(id\?:\s*string\):\s*Promise<AgentPreset>/, 'agent preset resolution changed')
-requireMatch(presets, /async read\(id:\s*string\):\s*Promise<string>/, 'agent preset reader changed')
-
 process.stdout.write(`DSH ${EXPECTED_DSH_VERSION} compatibility surface verified.\n`)

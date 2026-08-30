@@ -53,7 +53,6 @@ function installFetch(options: { putConflict?: boolean } = {}): void {
     if (url.endsWith('/templates')) return Response.json({ ok: true, templates: [], active: null, revision: REVISION })
     if (url.endsWith('/history')) return Response.json({ ok: true, history: [], revision: REVISION })
     if (url.endsWith('/project')) return Response.json({ ok: true, source: 'workspaceRegistry', projects: [] })
-    if (url.endsWith('/preset')) return Response.json({ ok: true, source: 'agentPresets', available: true, view: { preset: 'default', persona: '' } })
     return Response.json({
       ok: true,
       path: PATH,
@@ -65,6 +64,8 @@ function installFetch(options: { putConflict?: boolean } = {}): void {
       maxImportBytes: 16 * 1024 * 1024,
       active: null,
       hasBackup: false,
+      templates: [],
+      history: [],
     })
   }))
 }
@@ -97,7 +98,7 @@ describe('settings page', () => {
     const text = container.textContent ?? ''
     expect(text.indexOf('Global instructions')).toBeLessThan(text.indexOf('Instruction templates'))
     expect(text.indexOf('Instruction templates')).toBeLessThan(text.indexOf('Version history'))
-    expect(text.indexOf('Version history')).toBeLessThan(text.indexOf('Environment overview'))
+    expect(text.indexOf('Version history')).toBeLessThan(text.indexOf('Project AGENTS.md'))
 
     await act(async () => button(container, 'Preview').click())
     const markdown = container.querySelector('[data-markdown="true"]')
@@ -105,6 +106,40 @@ describe('settings page', () => {
     expect(markdown?.getAttribute('data-code-copy')).toBe('Copy code')
     expect(markdown?.getAttribute('data-code-copied')).toBe('Copied')
     expect(markdown?.getAttribute('data-footnotes')).toBe('Footnotes')
+  })
+
+  it('loads editable state from the root response without separate list reads', async () => {
+    let listReads = 0
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.endsWith('/templates')) {
+        listReads += 1
+        return Response.json({ ok: true, templates: [], active: null, revision: REVISION })
+      }
+      if (url.endsWith('/history')) {
+        listReads += 1
+        return Response.json({ ok: true, history: [], revision: REVISION })
+      }
+      if (url.endsWith('/project')) return Response.json({ ok: true, source: 'workspaceRegistry', projects: [] })
+      return Response.json({
+        ok: true,
+        path: PATH,
+        text: '# Saved',
+        revision: REVISION,
+        maxBytes: 65_536,
+        maxTemplates: 50,
+        maxHistory: 100,
+        maxImportBytes: 16 * 1024 * 1024,
+        active: null,
+        hasBackup: false,
+        templates: [],
+        history: [],
+      })
+    }))
+
+    await render('zh')
+
+    expect(listReads).toBe(0)
   })
 
   it('restores a profile-scoped browser draft without changing saved content', async () => {
@@ -166,7 +201,6 @@ describe('settings page', () => {
       }
       if (url.endsWith('/history')) return Response.json({ ok: true, history: [], revision: currentRevision })
       if (url.endsWith('/project')) return Response.json({ ok: true, source: 'workspaceRegistry', projects: [] })
-      if (url.endsWith('/preset')) return Response.json({ ok: true, source: 'agentPresets', available: true, view: { preset: 'default', persona: '' } })
       rootReads += 1
       currentRevision = rootReads === 1 ? REVISION : newerRevision
       return Response.json({
@@ -180,6 +214,8 @@ describe('settings page', () => {
         maxImportBytes: 16 * 1024 * 1024,
         active: null,
         hasBackup: false,
+        templates: [{ name: 'Template', size: 10, updatedAt: 1 }],
+        history: [],
       })
     }))
     const container = await render('zh')
@@ -199,5 +235,136 @@ describe('settings page', () => {
 
     expect(submittedRevision).toBe(REVISION)
     expect(container.textContent).toContain('检测到其他窗口或外部程序修改了数据')
+  })
+
+  it('keeps an unsaved template draft when creating another template is cancelled', async () => {
+    let createCalls = 0
+    vi.stubGlobal('confirm', vi.fn(() => false))
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/templates/Template')) {
+        return Response.json({ ok: true, name: 'Template', text: '# Template', revision: REVISION })
+      }
+      if (url.endsWith('/templates')) {
+        if (init?.method === 'POST') {
+          createCalls += 1
+          return Response.json({ ok: true, revision: 'b'.repeat(64) })
+        }
+        return Response.json({
+          ok: true,
+          templates: [{ name: 'Template', size: 10, updatedAt: 1 }],
+          active: null,
+          revision: REVISION,
+        })
+      }
+      if (url.endsWith('/history')) return Response.json({ ok: true, history: [], revision: REVISION })
+      if (url.endsWith('/project')) return Response.json({ ok: true, source: 'workspaceRegistry', projects: [] })
+      return Response.json({
+        ok: true,
+        path: PATH,
+        text: '# Saved',
+        revision: REVISION,
+        maxBytes: 65_536,
+        maxTemplates: 50,
+        maxHistory: 100,
+        maxImportBytes: 16 * 1024 * 1024,
+        active: null,
+        hasBackup: false,
+        templates: [{ name: 'Template', size: 10, updatedAt: 1 }],
+        history: [],
+      })
+    }))
+    const container = await render('zh')
+    const editTemplate = [...container.querySelectorAll('.cinstr-item .cinstr-link-button')]
+      .find((item) => item.textContent === '编辑') as HTMLButtonElement
+    await act(async () => { editTemplate.click(); await new Promise((resolve) => setTimeout(resolve, 0)) })
+
+    const templateArea = [...container.querySelectorAll('textarea')].at(-1) as HTMLTextAreaElement
+    await act(async () => {
+      const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+      setValue?.call(templateArea, '# Unsaved template')
+      templateArea.dispatchEvent(new Event('input', { bubbles: true }))
+      const name = container.querySelector('#cinstr-template-name') as HTMLInputElement
+      const setName = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+      setName?.call(name, 'New template')
+      name.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await act(async () => { button(container, '从当前内容创建').click(); await new Promise((resolve) => setTimeout(resolve, 0)) })
+
+    expect(window.confirm).toHaveBeenCalledOnce()
+    expect(createCalls).toBe(0)
+    expect((container.querySelector('.cinstr-item-body textarea') as HTMLTextAreaElement).value).toBe('# Unsaved template')
+  })
+
+  it('advances an open template revision after deleting another template', async () => {
+    const nextRevision = 'b'.repeat(64)
+    const savedRevision = 'c'.repeat(64)
+    let currentRevision = REVISION
+    let submittedRevision = ''
+    let templates = [
+      { name: 'First', size: 5, updatedAt: 1 },
+      { name: 'Second', size: 6, updatedAt: 2 },
+    ]
+    vi.stubGlobal('confirm', vi.fn(() => true))
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/templates/First')) {
+        if (init?.method === 'PUT') {
+          submittedRevision = String((JSON.parse(String(init.body)) as { expectedRevision: string }).expectedRevision)
+          currentRevision = savedRevision
+          return Response.json({ ok: true, revision: savedRevision })
+        }
+        return Response.json({ ok: true, name: 'First', text: '# First', revision: currentRevision })
+      }
+      if (url.endsWith('/templates/Second') && init?.method === 'DELETE') {
+        templates = templates.filter(({ name }) => name !== 'Second')
+        currentRevision = nextRevision
+        return Response.json({ ok: true, active: null, revision: nextRevision })
+      }
+      if (url.endsWith('/templates')) {
+        return Response.json({ ok: true, templates, active: null, revision: currentRevision })
+      }
+      if (url.endsWith('/history')) return Response.json({ ok: true, history: [], revision: currentRevision })
+      if (url.endsWith('/project')) return Response.json({ ok: true, source: 'workspaceRegistry', projects: [] })
+      return Response.json({
+        ok: true,
+        path: PATH,
+        text: '# Saved',
+        revision: currentRevision,
+        maxBytes: 65_536,
+        maxTemplates: 50,
+        maxHistory: 100,
+        maxImportBytes: 16 * 1024 * 1024,
+        active: null,
+        hasBackup: false,
+        templates,
+        history: [],
+      })
+    }))
+    const container = await render('zh')
+    const rows = [...container.querySelectorAll('.cinstr-item')]
+    const first = rows.find((row) => row.querySelector('.cinstr-item-name')?.textContent === 'First') as HTMLLIElement
+    const second = rows.find((row) => row.querySelector('.cinstr-item-name')?.textContent === 'Second') as HTMLLIElement
+    await act(async () => {
+      ;([...first.querySelectorAll('button')].find((item) => item.textContent === '编辑') as HTMLButtonElement).click()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    await act(async () => {
+      ;([...second.querySelectorAll('button')].find((item) => item.textContent === '删除') as HTMLButtonElement).click()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    const templateArea = container.querySelector('.cinstr-item-body textarea') as HTMLTextAreaElement
+    await act(async () => {
+      const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+      setValue?.call(templateArea, '# Updated first')
+      templateArea.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await act(async () => {
+      ;(container.querySelector('.cinstr-item-body .cinstr-button') as HTMLButtonElement).click()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    expect(submittedRevision).toBe(nextRevision)
   })
 })

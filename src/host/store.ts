@@ -442,14 +442,18 @@ async function writeGlobalRaw(globalPath: string, text: string, nextActive: stri
 }
 
 async function logicalState(globalPath: string): Promise<LogicalSnapshot> {
-  const [current, backup, active, templates, history] = await Promise.all([
+  const [current, backup, active, templateFiles, history] = await Promise.all([
     readOptional(globalPath),
     readOptional(`${globalPath}.bak`),
     readActive(globalPath),
-    listTemplates(globalPath),
+    scanTemplateFiles(globalPath),
     listHistory(globalPath),
   ])
-  const templateTexts = await Promise.all(templates.map(async ({ name }) => ({ name, text: await readTemplate(globalPath, name) })))
+  const templateTexts = await Promise.all([...templateFiles.values()].map(async ({ name, path }) => ({
+    name,
+    text: await readFile(path, 'utf8'),
+  })))
+  templateTexts.sort((a, b) => a.name.localeCompare(b.name))
   const historyTexts = await Promise.all(history.map(async ({ id }) => ({ id, text: await readHistory(globalPath, id) })))
   return {
     format: 'dsh-instructions-rollback-v1',

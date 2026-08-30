@@ -11,7 +11,6 @@ import {
   importBundle,
   listHistory,
   listTemplates,
-  presetView,
   projectView,
   readHistory,
   readInstructions,
@@ -24,7 +23,6 @@ import {
   type ExportBundle,
   type HistoryEntry,
   type InstructionsResult,
-  type PresetView,
   type ProjectEntry,
   type TemplateEntry,
 } from './api.ts'
@@ -105,19 +103,12 @@ const zh = {
   confirmRestore: '用 {time} 的历史内容替换当前全局指令？',
   historyRestored: '已恢复所选历史版本。',
   overviewEyebrow: '只读',
-  overviewTitle: '环境概览',
-  overviewDesc: '这里仅展示项目指令和 Persona 来源，不在本插件中修改。',
-  projectTitle: '项目级 AGENTS.md',
-  projectSource: '来源：DSH workspaceRegistry；请直接编辑对应项目根目录中的文件。',
+  overviewTitle: '项目级 AGENTS.md',
+  overviewDesc: '只读显示 DSH 已注册工作区的项目指令状态；请直接编辑对应项目根目录中的文件。',
   present: '已存在',
   missing: '未创建',
   unreadable: '无法读取',
   noProjects: '当前没有已注册的工作区。',
-  personaTitle: '当前 Persona',
-  personaSource: '来源：DSH agentPresets；请在 Agent presets 设置页修改。',
-  noPersonaService: '当前环境没有可读的 Persona：{reason}',
-  noPersona: '该 preset 没有 persona 段落。',
-  officialDocs: '查看 DSH 官方文档',
   footer: 'Ctrl/Cmd+S 会保存当前正在编辑的全局指令或模板。',
   refresh: '刷新数据',
   refreshing: '正在刷新…',
@@ -211,19 +202,12 @@ const en: Record<TranslationKey, string> = {
   confirmRestore: 'Replace the global instructions with the version from {time}?',
   historyRestored: 'Restored the selected history version.',
   overviewEyebrow: 'Read only',
-  overviewTitle: 'Environment overview',
-  overviewDesc: 'Project instructions and Persona sources are shown here but edited elsewhere.',
-  projectTitle: 'Project AGENTS.md',
-  projectSource: 'Source: DSH workspaceRegistry. Edit the file in the corresponding project root.',
+  overviewTitle: 'Project AGENTS.md',
+  overviewDesc: 'Read-only status for project instructions in registered DSH workspaces. Edit each file in its project root.',
   present: 'Present',
   missing: 'Not created',
   unreadable: 'Unreadable',
   noProjects: 'No workspaces are currently registered.',
-  personaTitle: 'Current Persona',
-  personaSource: 'Source: DSH agentPresets. Edit it from the Agent presets settings page.',
-  noPersonaService: 'No readable Persona is available: {reason}',
-  noPersona: 'This preset has no persona section.',
-  officialDocs: 'Open the official DSH docs',
   footer: 'Ctrl/Cmd+S saves the global instructions or template currently being edited.',
   refresh: 'Refresh data',
   refreshing: 'Refreshing…',
@@ -306,18 +290,13 @@ export const CSS = `
 .cinstr-item-meta { margin-left: auto; color: var(--dsw-alias-label-secondary); font-size: 11px; white-space: nowrap; }
 .cinstr-link-button { padding: 3px 5px; border: 0; background: transparent; color: var(--dsw-alias-brand-primary); cursor: pointer; font: inherit; font-size: 12px; }
 .cinstr-mono { color: var(--dsw-alias-label-secondary); font: 11px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
-.cinstr-overview { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.cinstr-overview-card { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 12px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; background: var(--dsw-alias-bg-base); }
 .cinstr-status { margin-left: auto; font-size: 11px; }
 .cinstr-status[data-status='present'] { color: var(--dsw-alias-state-success-primary); }
 .cinstr-status[data-status='unreadable'] { color: var(--dsw-alias-state-error-primary); }
-.cinstr-doc-link { width: fit-content; color: var(--dsw-alias-brand-primary); font-size: 12px; text-decoration: none; }
-.cinstr-doc-link:hover { text-decoration: underline; }
 .cinstr-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .cinstr-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 @media (max-width: 640px) {
   .cinstr-section { padding: 15px 13px; }
-  .cinstr-overview { grid-template-columns: 1fr; }
   .cinstr-item-top { align-items: flex-start; flex-wrap: wrap; }
   .cinstr-item-meta { width: 100%; margin-left: 0; }
   .cinstr-count { width: 100%; margin-left: 0; }
@@ -380,14 +359,8 @@ function downloadJson(filename: string, payload: unknown): void {
 }
 
 async function readEditableState(): Promise<EditableState> {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const instructions = await readInstructions()
-    const [templates, history] = await Promise.all([listTemplates(), listHistory()])
-    if (instructions.revision === templates.revision && instructions.revision === history.revision) {
-      return { instructions, templates: templates.templates, history: history.history }
-    }
-  }
-  throw new ApiError('REVISION_CONFLICT', 'data changed while the page was loading', 409)
+  const instructions = await readInstructions()
+  return { instructions, templates: instructions.templates, history: instructions.history }
 }
 
 function ModeTabs(props: { mode: EditorMode; setMode: (mode: EditorMode) => void; t: T }): JSX.Element {
@@ -459,9 +432,6 @@ export function CustomInstructionsSection({ t }: SectionProps): JSX.Element {
   const [selectedHistory, setSelectedHistory] = useState<string | null>(null)
   const [historyPreview, setHistoryPreview] = useState('')
   const [projects, setProjects] = useState<ProjectEntry[]>([])
-  const [preset, setPreset] = useState<PresetView | null>(null)
-  const [presetAvailable, setPresetAvailable] = useState(false)
-  const [presetReason, setPresetReason] = useState('')
   const [overviewError, setOverviewError] = useState('')
   const [overviewLoading, setOverviewLoading] = useState(true)
   const fileInput = useRef<HTMLInputElement>(null)
@@ -518,19 +488,15 @@ export function CustomInstructionsSection({ t }: SectionProps): JSX.Element {
 
   const loadOverview = useCallback(async (): Promise<void> => {
     setOverviewLoading(true)
-    const [projectResult, presetResult] = await Promise.allSettled([projectView(), presetView()])
-    const failures: string[] = []
-    if (projectResult.status === 'fulfilled') setProjects(projectResult.value.projects)
-    else failures.push(message(projectResult.reason))
-    if (presetResult.status === 'fulfilled') {
-      setPreset(presetResult.value.view)
-      setPresetAvailable(presetResult.value.available)
-      setPresetReason(presetResult.value.reason ?? '')
-    } else {
-      failures.push(message(presetResult.reason))
+    try {
+      const result = await projectView()
+      setProjects(result.projects)
+      setOverviewError('')
+    } catch (error) {
+      setOverviewError(message(error))
+    } finally {
+      setOverviewLoading(false)
     }
-    setOverviewError(failures.join('; '))
-    setOverviewLoading(false)
   }, [])
 
   useEffect(() => {
@@ -674,6 +640,7 @@ export function CustomInstructionsSection({ t }: SectionProps): JSX.Element {
   const createTemplate = async (): Promise<void> => {
     const name = newTemplateName.trim()
     if (instructions === null || !nameValid || overLimit || busy !== null) return
+    if (templateDirty && !window.confirm(t('discardWarning'))) return
     setBusy('create-template')
     try {
       const result = await saveTemplate(name, globalDraft, instructions.revision)
@@ -749,6 +716,7 @@ export function CustomInstructionsSection({ t }: SectionProps): JSX.Element {
       const result = await deleteTemplate(name, instructions.revision)
       setInstructions({ ...instructions, revision: result.revision, active: result.active })
       if (selectedTemplate === name) setSelectedTemplate(null)
+      else if (selectedTemplate !== null) setTemplateRevision(result.revision)
       setNotice({ kind: 'ok', text: t('templateDeleted', { name }) })
       await refreshLists(result.revision)
       requestAnimationFrame(() => templateNameInput.current?.focus())
@@ -1095,34 +1063,16 @@ export function CustomInstructionsSection({ t }: SectionProps): JSX.Element {
         <p className="cinstr-desc">{t('overviewDesc')}</p>
         {overviewLoading && <p className="cinstr-meta">{t('loading')}</p>}
         {overviewError !== '' && <p className="cinstr-notice" data-kind="error" role="alert">{t('loadFailed', { message: overviewError })}</p>}
-        <div className="cinstr-overview">
-          <div className="cinstr-overview-card">
-            <h3 className="cinstr-subheading">{t('projectTitle')}</h3>
-            <p className="cinstr-desc">{t('projectSource')}</p>
-            {sortedProjects.length === 0 && !overviewLoading && <p className="cinstr-empty">{t('noProjects')}</p>}
-            <ul className="cinstr-list">
-              {sortedProjects.map((project) => (
-                <li className="cinstr-item-top" key={project.path}>
-                  <span className="cinstr-item-name">{project.title}</span>
-                  <span className="cinstr-status" data-status={project.status}>{t(project.status)}</span>
-                  <span className="cinstr-mono" style={{ width: '100%' }}>{project.agentsPath}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-          <div className="cinstr-overview-card">
-            <h3 className="cinstr-subheading">{t('personaTitle')}</h3>
-            <p className="cinstr-desc">{t('personaSource')}</p>
-            {!presetAvailable && !overviewLoading && <p className="cinstr-empty">{t('noPersonaService', { reason: presetReason })}</p>}
-            {presetAvailable && preset !== null && (
-              <>
-                <p className="cinstr-mono">preset: {preset.preset}</p>
-                {preset.persona === '' ? <p className="cinstr-empty">{t('noPersona')}</p> : <pre className="cinstr-mono" style={{ margin: 0, whiteSpace: 'pre-wrap', maxHeight: 240, overflow: 'auto' }}>{preset.persona.slice(0, 4000)}</pre>}
-              </>
-            )}
-            <a className="cinstr-doc-link" href="https://github.com/deepseek-ai/deepseek-harness" target="_blank" rel="noreferrer">{t('officialDocs')}</a>
-          </div>
-        </div>
+        {sortedProjects.length === 0 && !overviewLoading && <p className="cinstr-empty">{t('noProjects')}</p>}
+        <ul className="cinstr-list">
+          {sortedProjects.map((project) => (
+            <li className="cinstr-item-top" key={project.path}>
+              <span className="cinstr-item-name">{project.title}</span>
+              <span className="cinstr-status" data-status={project.status}>{t(project.status)}</span>
+              <span className="cinstr-mono" style={{ width: '100%' }}>{project.agentsPath}</span>
+            </li>
+          ))}
+        </ul>
       </section>
 
       <div className="cinstr-footer">

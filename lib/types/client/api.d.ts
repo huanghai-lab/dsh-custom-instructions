@@ -16,6 +16,8 @@ export interface InstructionsResult {
     maxImportBytes: number;
     active: string | null;
     hasBackup: boolean;
+    templates: TemplateEntry[];
+    history: HistoryEntry[];
 }
 export interface MutationResult {
     ok: true;
@@ -38,10 +40,6 @@ export interface ProjectEntry {
     hasAgents: boolean;
     status: 'present' | 'missing' | 'unreadable';
     message?: string;
-}
-export interface PresetView {
-    preset: string;
-    persona: string;
 }
 export interface ExportBundle {
     format?: 'dsh-instructions-v1' | 'dsh-instructions-v2';
@@ -110,12 +108,6 @@ export declare function restoreHistory(id: string, expectedRevision: string): Pr
 }>;
 export declare function projectView(): Promise<{
     projects: ProjectEntry[];
-    source: string;
-}>;
-export declare function presetView(): Promise<{
-    view: PresetView | null;
-    available: boolean;
-    reason?: string;
     source: string;
 }>;
 export declare function exportBundle(): Promise<{

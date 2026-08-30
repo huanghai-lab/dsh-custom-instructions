@@ -46,14 +46,14 @@ The UI follows the DSH locale and falls back to English. A Chinese screenshot is
 | Templates | Unicode names, independent edit/preview/save, activate, and confirmed delete; up to 50 |
 | History | Snapshot before every replacement, expandable preview and confirmed restore; newest 100 |
 | Import/export | Current content, templates, history, and active state; strict validation and rollback |
-| Environment overview | Read-only project `AGENTS.md` and Persona sources |
+| Project instruction overview | Read-only project `AGENTS.md` status for registered workspaces |
 | Accessibility | Keyboard save, focus restoration, ARIA, native dialogs/file picker, responsive layout |
 
 Markdown previews use DSH's official `MarkdownText`; the plugin does not ship another Markdown parser.
 
 ## Data safety
 
-- The plugin writes only `$DSH_HOME/AGENTS.md` and its sibling `instructions/` data. Project instructions and Persona remain read-only.
+- The plugin writes only `$DSH_HOME/AGENTS.md` and its sibling `instructions/` data. Project instructions remain read-only.
 - Every mutation supplies a SHA-256 `revision` derived from actual disk content. A multi-window or external edit returns `409` instead of being overwritten.
 - Mutations are serialized inside the DSH process. Files are written to a same-directory temporary file, read back for verification, and then replaced.
 - Before replacing global content, the previous value is written to `AGENTS.md.bak` and history. Undo is offered only when the backup truly exists.
@@ -145,7 +145,7 @@ pnpm e2e -- /path/to/deepseek-harness
 
 First run the locked install and build in the official `dsh-v0.1.2-alpha.1` source checkout. `pnpm e2e -- <source-directory>` uses that build and the current plugin tarball, creates an isolated `DSH_HOME` and workspace under the OS temporary directory, then exercises one-time login, save, preview, templates, history, import/export, and both locales in the real GUI. It never touches the user's real `AGENTS.md`.
 
-`pnpm compat:dsh` checks the DSH source directory for the client Context, Markdown, settings, workspace, Persona, and Web route interfaces used by this plugin. CI runs it against the official `dsh-v0.1.2-alpha.1` tag.
+`pnpm compat:dsh` checks the DSH source directory for the client Context, Markdown, settings, workspace, and Web route interfaces used by this plugin. CI runs it against the official `dsh-v0.1.2-alpha.1` tag.
 
 CI runs locked install, typecheck, tests, build, and committed-`lib` freshness on Node 24 for Ubuntu and Windows. Ubuntu also builds the official alpha tag, typechecks against its declarations, and runs isolated browser E2E. Once upstream npm packages are installable, the npm installation path must still be rechecked against the published artifacts.
 

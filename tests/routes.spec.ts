@@ -146,6 +146,8 @@ describe('global instructions and concurrency', () => {
         maxTemplates: 50,
         maxHistory: 100,
         maxImportBytes: 16 * 1024 * 1024,
+        templates: [],
+        history: [],
       })
       expect(body.revision).toMatch(/^[0-9a-f]{64}$/)
     } finally {
@@ -504,7 +506,7 @@ describe('import and export', () => {
   }, 30_000)
 })
 
-describe('read-only overview', () => {
+describe('read-only project overview', () => {
   it('distinguishes present, missing, and unreadable project instructions', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'custinstr-'))
     try {
@@ -518,16 +520,9 @@ describe('read-only overview', () => {
       const workspaces = [present, missing, unreadable].map((path) => ({ id: path, path, title: path.split(/[\\/]/).at(-1) ?? path }))
       const { handler } = fakeCtx(join(directory, 'settings.yaml'), {
         workspaceRegistry: { list: () => workspaces },
-        agentPresets: {
-          resolve: async () => ({ id: 'default' }),
-          read: async () => '- id: persona\n  text: |-\n    precise and calm\n- id: tools\n',
-        },
       })
       const projects = envelope(await handler('GET', '/project')).projects as Array<{ status: string }>
       expect(projects.map(({ status }) => status)).toEqual(['present', 'missing', 'unreadable'])
-
-      const preset = envelope(await handler('GET', '/preset'))
-      expect(preset).toMatchObject({ available: true, view: { preset: 'default', persona: 'precise and calm' } })
     } finally {
       await rm(directory, { recursive: true, force: true })
     }

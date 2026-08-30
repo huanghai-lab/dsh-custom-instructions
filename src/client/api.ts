@@ -24,6 +24,8 @@ export interface InstructionsResult {
   maxImportBytes: number
   active: string | null
   hasBackup: boolean
+  templates: TemplateEntry[]
+  history: HistoryEntry[]
 }
 
 export interface MutationResult {
@@ -50,11 +52,6 @@ export interface ProjectEntry {
   hasAgents: boolean
   status: 'present' | 'missing' | 'unreadable'
   message?: string
-}
-
-export interface PresetView {
-  preset: string
-  persona: string
 }
 
 export interface ExportBundle {
@@ -219,20 +216,6 @@ export async function restoreHistory(id: string, expectedRevision: string): Prom
 
 export async function projectView(): Promise<{ projects: ProjectEntry[]; source: string }> {
   return (await request('GET', '/project')) as unknown as { projects: ProjectEntry[]; source: string }
-}
-
-export async function presetView(): Promise<{
-  view: PresetView | null
-  available: boolean
-  reason?: string
-  source: string
-}> {
-  return (await request('GET', '/preset')) as unknown as {
-    view: PresetView | null
-    available: boolean
-    reason?: string
-    source: string
-  }
 }
 
 export async function exportBundle(): Promise<{ bundle: ExportBundle; revision: string }> {

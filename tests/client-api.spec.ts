@@ -23,6 +23,8 @@ describe('browser API client', () => {
       maxImportBytes: 16 * 1024 * 1024,
       active: null,
       hasBackup: false,
+      templates: [],
+      history: [],
     }
     respond(JSON.stringify(payload))
 
