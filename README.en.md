@@ -13,13 +13,13 @@ A safe instruction manager for DSH Web: edit the global `AGENTS.md`, reuse templ
 
 It is a portable, recoverable, conflict-safe workspace for global instructions rather than a bare rules textarea.
 
-> Stable v0.4.0 supports DSH `0.1.1-rc.2`. Keep using plugin v0.3.0 on older DSH installations.
+> Stable v0.5.0 supports DSH `0.1.2-alpha.1` and has passed a tagged-source build, isolated plugin-tarball installation, and real browser E2E.
 
-> Preview v0.5.0-alpha.2 tracks the official [`dsh-v0.1.2-alpha.1`](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.2-alpha.1), and has passed a tagged-source build, isolated plugin-tarball installation, and real browser E2E. Upstream has not published this DSH preview to npm; only testers running the official source build should install this plugin's `next` version.
+> DSH `0.1.1-rc.2` users must pin plugin v0.4.0; older DSH installations should remain on v0.3.0.
 
 ## Quick start
 
-Requirements: Node.js `^22.19.0 || >=24.0.0`, pnpm, and DSH `0.1.1-rc.2`.
+Requirements: Node.js `^22.19.0 || >=24.0.0`, pnpm, and DSH `0.1.2-alpha.1`.
 
 ```bash
 dsh plugin --profile web add @huanghai-lab/dsh-custom-instructions
@@ -28,10 +28,10 @@ dsh web
 
 Restart the Web profile, then open **Settings → Custom instructions**.
 
-When running the official DSH `0.1.2-alpha.1` source build, install the preview:
+To pin the stable release explicitly:
 
 ```bash
-dsh plugin --profile web add @huanghai-lab/dsh-custom-instructions@next
+dsh plugin --profile web add @huanghai-lab/dsh-custom-instructions@0.5.0
 ```
 
 ![English UI](docs/assets/settings-en.png)
@@ -80,18 +80,18 @@ $DSH_HOME/
 
 Template filenames use Node's native Base64URL encoding. Display names are never appended directly to filesystem paths.
 
-## Upgrade from v0.3.0
+## Upgrades and version selection
+
+```bash
+dsh plugin --profile web add @huanghai-lab/dsh-custom-instructions@0.5.0
+```
+
+Export once before upgrading from v0.3.0. v0.5.0 reads v0.3 ASCII template files and numeric history IDs; a legacy template migrates to the encoded filename on its first successful write. v0.3 exports and bundles without a `format` field are parsed as v0.3 data.
+
+If DSH is still `0.1.1-rc.2`, pin plugin v0.4.0:
 
 ```bash
 dsh plugin --profile web add @huanghai-lab/dsh-custom-instructions@0.4.0
-```
-
-Export once from v0.3.0 before upgrading. v0.4.0 reads v0.3 ASCII template files and numeric history IDs; a legacy template migrates to the encoded filename on its first successful write. v0.3 exports and bundles without a `format` field are parsed as v0.3 data.
-
-If DSH is not yet `0.1.1-rc.2`, keep the old plugin:
-
-```bash
-dsh plugin --profile web add @huanghai-lab/dsh-custom-instructions@0.3.0
 ```
 
 ## Import behavior
@@ -123,13 +123,13 @@ Check the displayed storage path, `$DSH_HOME` permissions, and DSH logs. The hos
 
 ### The plugin stopped loading after a DSH upgrade
 
-Stable v0.4.0 guarantees compatibility only with `0.1.1-rc.2`. Preview v0.5.0-alpha.2 removes the client runtime deleted by `0.1.2-alpha.1`, supports the new Markdown labels and browser-authentication APIs, and has completed isolated installation against the official tagged source build.
+Stable v0.5.0 guarantees compatibility only with `0.1.2-alpha.1`. It removes the client runtime deleted by that release, supports the new Markdown labels and browser-authentication APIs, and has completed isolated installation against the official tagged source build. DSH `0.1.1-rc.2` users should install plugin v0.4.0.
 
 ## Compatibility
 
 | Plugin | DSH | Node.js | Status |
 |---|---|---|---|
-| v0.5.0-alpha.2 (`next`) | `0.1.2-alpha.1` | `^22.19.0 || >=24` | Preview; tagged-source build, isolated plugin-tarball installation, and real browser E2E passed |
+| v0.5.0 (`latest`) | `0.1.2-alpha.1` | `^22.19.0 || >=24` | Stable; tagged-source build, isolated plugin-tarball installation, and real browser E2E passed |
 | v0.4.0 | `0.1.1-rc.2` | `^22.19.0 || >=24` | Released and isolated-install E2E verified |
 | v0.3.0 | `0.1.0-rc.6` | `^22.19.0 || >=24` | Legacy environments |
 

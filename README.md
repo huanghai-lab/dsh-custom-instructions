@@ -13,13 +13,13 @@ DSH Web 的安全指令管理器：编辑全局 `AGENTS.md`，复用模板，预
 
 它不是单一的规则文本框，而是面向可迁移、可恢复和并发安全维护的全局指令工作台。
 
-> 稳定版 v0.4.0 适配 DSH `0.1.1-rc.2`。仍在使用更早 DSH 时，请继续使用本插件 v0.3.0。
+> 正式版 v0.5.0 适配 DSH `0.1.2-alpha.1`，并通过官方标签源码构建、插件 tarball 隔离安装与真实浏览器 E2E。
 
-> 预览版 v0.5.0-alpha.2 同步官方源码标签 [`dsh-v0.1.2-alpha.1`](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.2-alpha.1)，并通过官方标签源码构建、插件 tarball 隔离安装与真实浏览器 E2E。上游尚未把该 DSH 预览版发布到 npm；只有使用官方源码构建的测试者才应安装本插件的 `next` 版本。
+> DSH `0.1.1-rc.2` 用户请锁定插件 v0.4.0；更早的 DSH 请继续使用 v0.3.0。
 
 ## 快速开始
 
-前提：Node.js `^22.19.0 || >=24.0.0`、pnpm，以及已安装的 DSH `0.1.1-rc.2`。
+前提：Node.js `^22.19.0 || >=24.0.0`、pnpm，以及 DSH `0.1.2-alpha.1`。
 
 ```bash
 dsh plugin --profile web add @huanghai-lab/dsh-custom-instructions
@@ -28,10 +28,10 @@ dsh web
 
 重启 Web profile 后，打开 **设置 → 自定义指令**。
 
-使用 DSH `0.1.2-alpha.1` 官方源码构建时，安装预览版：
+需要锁定正式版本时：
 
 ```bash
-dsh plugin --profile web add @huanghai-lab/dsh-custom-instructions@next
+dsh plugin --profile web add @huanghai-lab/dsh-custom-instructions@0.5.0
 ```
 
 ![中文界面：全局指令与模板](docs/assets/settings-zh.png)
@@ -80,18 +80,18 @@ $DSH_HOME/
 
 模板物理文件名使用 Node 原生 Base64URL 编码，模板显示名称不会直接拼入路径。
 
-## 从 v0.3.0 升级
+## 升级与版本选择
+
+```bash
+dsh plugin --profile web add @huanghai-lab/dsh-custom-instructions@0.5.0
+```
+
+从 v0.3.0 升级前建议先导出一次数据。v0.5.0 会继续读取 v0.3 的 ASCII 模板和数字历史 ID；旧模板第一次成功写入时会迁移到编码文件名。v0.3 导出包及缺少 `format` 字段的旧包会按 v0.3 格式解析。
+
+如果 DSH 仍是 `0.1.1-rc.2`，请锁定插件 v0.4.0：
 
 ```bash
 dsh plugin --profile web add @huanghai-lab/dsh-custom-instructions@0.4.0
-```
-
-升级前建议先在 v0.3.0 中导出一次数据。v0.4.0 会继续读取 v0.3 的 ASCII 模板和数字历史 ID；旧模板第一次成功写入时会迁移到编码文件名。v0.3 导出包及缺少 `format` 字段的旧包会按 v0.3 格式解析。
-
-如果 DSH 还不是 `0.1.1-rc.2`，不要升级插件：
-
-```bash
-dsh plugin --profile web add @huanghai-lab/dsh-custom-instructions@0.3.0
 ```
 
 ## 导入规则
@@ -123,13 +123,13 @@ dsh web
 
 ### DSH 升级后插件无法加载
 
-稳定版 v0.4.0 只承诺兼容 `0.1.1-rc.2`。预览版 v0.5.0-alpha.2 已移除 `0.1.2-alpha.1` 删除的客户端 runtime 依赖，适配新版 Markdown 标签和浏览器鉴权接口，并在官方标签源码构建中完成隔离安装验证。
+正式版 v0.5.0 只承诺兼容 `0.1.2-alpha.1`。它已移除该版本删除的客户端 runtime 依赖，适配新版 Markdown 标签和浏览器鉴权接口，并在官方标签源码构建中完成隔离安装验证。DSH `0.1.1-rc.2` 用户请使用插件 v0.4.0。
 
 ## 兼容矩阵
 
 | 插件版本 | DSH | Node.js | 状态 |
 |---|---|---|---|
-| v0.5.0-alpha.2 (`next`) | `0.1.2-alpha.1` | `^22.19.0 || >=24` | 预览版；官方标签源码构建、插件 tarball 隔离安装与真实浏览器 E2E 已通过 |
+| v0.5.0 (`latest`) | `0.1.2-alpha.1` | `^22.19.0 || >=24` | 正式版；官方标签源码构建、插件 tarball 隔离安装与真实浏览器 E2E 已通过 |
 | v0.4.0 | `0.1.1-rc.2` | `^22.19.0 || >=24` | 已发布并通过隔离安装 E2E |
 | v0.3.0 | `0.1.0-rc.6` | `^22.19.0 || >=24` | 旧环境保留 |
 

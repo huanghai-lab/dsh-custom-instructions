@@ -4,6 +4,27 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-31
+
+### Changed
+
+- 支持 DSH `0.1.2-alpha.1` 的新版客户端上下文、Markdown 标签与浏览器鉴权接口。
+- 将已验证的 `0.5.0-alpha.2` 提升为正式版；正式版不再增加运行时改动。
+
+### Fixed
+
+- 创建新模板前保护尚未保存的模板草稿，取消确认后不会丢失编辑内容。
+- 删除其他模板后同步当前模板的磁盘修订号，避免后续保存出现错误的 `409` 冲突。
+
+### Security
+
+- 所有写入继续使用磁盘内容派生的修订号、进程内串行队列和原子替换，避免静默覆盖与部分写入。
+- 未登录的浏览器请求不能读取或修改私人指令。
+
+### Validation
+
+- 35 项测试、Windows/Ubuntu Node 24 构建、提交产物新鲜度、DSH `0.1.2-alpha.1` 源码兼容与隔离浏览器 E2E 均通过。
+
 ## [0.5.0-alpha.2] - 2026-08-31
 
 ### Fixed
@@ -56,7 +77,8 @@
 - 修改进入进程内串行队列，并通过同目录临时文件、回读校验和替换完成。
 - 模板名不再直接作为物理路径，阻断路径穿越。
 
-[Unreleased]: https://github.com/huanghai-lab/dsh-custom-instructions/compare/v0.5.0-alpha.2...HEAD
+[Unreleased]: https://github.com/huanghai-lab/dsh-custom-instructions/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/huanghai-lab/dsh-custom-instructions/compare/v0.4.0...v0.5.0
 [0.5.0-alpha.2]: https://github.com/huanghai-lab/dsh-custom-instructions/compare/v0.5.0-alpha.1...v0.5.0-alpha.2
 [0.5.0-alpha.1]: https://github.com/huanghai-lab/dsh-custom-instructions/compare/v0.4.0...v0.5.0-alpha.1
 [0.4.0]: https://github.com/huanghai-lab/dsh-custom-instructions/compare/v0.3.0...v0.4.0
